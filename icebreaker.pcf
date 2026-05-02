@@ -4,3 +4,7 @@ set_frequency io_clk 12
 
 # LED
 set_io io_led        11
+
+# Button
+set_io io_reset      10
+
