@@ -14,7 +14,7 @@ case class Blinky() extends Component {
   )
 
   val area = new ClockingArea(cd) {
-    val counter = Reg(UInt(24 bits)) init(0)
+    val counter = Reg(UInt(25 bits)) init(0)
     counter := counter + 1
     io.led := counter.msb
   }
