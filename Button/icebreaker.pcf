@@ -1,0 +1,10 @@
+# 12 MHz clock
+set_io io_clk        35
+set_frequency io_clk 12
+
+# LED
+set_io io_led        11
+
+# Button
+set_io io_btn        10
+
