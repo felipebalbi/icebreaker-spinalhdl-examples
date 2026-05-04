@@ -1,5 +1,6 @@
 PACKAGE := pwm
 TOP     := PwmTop
+SIM_MAIN := PwmSim
 SRC_DIR := src
 GEN_DIR := gen
 PCF     := icebreaker.pcf
@@ -48,6 +49,9 @@ $(ASC): $(JSON) $(PCF)
 # 4. Pack (ASC → BIN)
 $(BIN): $(ASC)
 	$(ICEPACK) $< $@
+
+sim:
+	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 
 # Flash
 flash: $(BIN)

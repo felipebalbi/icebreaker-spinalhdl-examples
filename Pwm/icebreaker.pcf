@@ -1,7 +1,23 @@
 # 12 MHz clock
-set_io io_clk        35
-set_frequency io_clk 12
+set_io clk           35
+set_frequency clk    12
 
-# LED
-set_io io_led        11
+# pwm
+set_io io_pwm        11
 
+# reset
+set_io reset         10
+
+# duty
+set_io io_duty[0]    4
+set_io io_duty[1]    2
+set_io io_duty[2]    47
+set_io io_duty[3]    45
+set_io io_duty[4]    3
+set_io io_duty[5]    48
+set_io io_duty[6]    46
+set_io io_duty[7]    44
+set_io io_duty[8]    43
+set_io io_duty[9]    38
+set_io io_duty[10]   34
+set_io io_duty[11]   31
