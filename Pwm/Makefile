@@ -3,6 +3,7 @@ TOP     := PwmTop
 SIM_MAIN := PwmSim
 SRC_DIR := src
 GEN_DIR := gen
+SIM_DIR := simWorkspace
 PCF     := icebreaker.pcf
 
 # Tools
@@ -59,6 +60,6 @@ flash: $(BIN)
 
 # Clean
 clean:
-	rm -rf $(GEN_DIR)
+	rm -rf $(GEN_DIR) $(SIM_DIR)
 
 .PHONY: all flash clean
