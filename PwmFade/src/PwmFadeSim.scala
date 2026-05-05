@@ -7,11 +7,13 @@ import spinal.sim._
 object PwmFadeSim {
   def main(args: Array[String]): Unit = {
 
-    val width = 8
+    // Use a small width and tiny prescaler so a full breath fits in sim.
+    val width          = 8
+    val prescalerWidth = 2
 
     SimConfig
       .withWave
-      .compile(PwmFadeTop(width))
+      .compile(PwmFadeTop(width = width, prescalerWidth = prescalerWidth))
       .doSim { dut =>
 
         // Clock (since Pwm has implicit clock domain)
