@@ -3,6 +3,15 @@ package pwm_fade
 import spinal.core._
 import spinal.core.sim._
 
+/** Standalone sim for `PhaseGen`.
+  *
+  * Drives `io.tick` permanently high (so phase advances every cycle)
+  * and walks long enough to traverse a full triangle. Asserts that:
+  *   - phase reaches both 0 and max, and
+  *   - direction (`up`) flips at least once each way.
+  *
+  * Run: `sbt "runMain pwm_fade.PhaseGenSim"` (or `make sim-phase`).
+  */
 object PhaseGenSim {
   def main(args: Array[String]): Unit = {
 

@@ -3,6 +3,22 @@ package pwm_fade
 import spinal.core._
 import spinal.core.sim._
 
+/** LUT-content tests for the shapers.
+  *
+  * For each `Shaper` subclass, sweeps `phase` over the entire input
+  * range and compares `io.duty` to the same Scala formula used to
+  * build the LUT. Catches off-by-one and rounding bugs in the table
+  * generation.
+  *
+  * Notes
+  *   - `dut.io.phase #= i` is sim-DSL: drive a value onto a hardware
+  *     signal in the testbench.
+  *   - `sleep(1)` lets combinational logic settle before reading.
+  *     Enough because the shapers use `readAsync`. With `readSync`
+  *     we'd need `dut.clockDomain.waitSampling()` instead.
+  *
+  * Run: `sbt "runMain pwm_fade.ShaperSim"` (or `make sim-shaper`).
+  */
 object ShaperSim {
   def main(args: Array[String]): Unit = {
     checkIdentity(width = 6)

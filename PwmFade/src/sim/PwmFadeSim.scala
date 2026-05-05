@@ -4,6 +4,18 @@ import spinal.core._
 import spinal.core.sim._
 import spinal.sim._
 
+/** End-to-end smoke sim for `PwmFadeTop`.
+  *
+  * Uses a small `width` and a tiny `prescalerWidth` so a full breath
+  * fits in a reasonable sim window. Open the resulting `.vcd`/wave
+  * file in GTKWave (look under `simWorkspace/`) to see:
+  *   - `io.pwm` toggling at the carrier rate, and
+  *   - the `Modulator`'s internal phase/duty ramping up and down.
+  *
+  * Tweak `cfg.kind` to inspect Identity / Sine / Gamma waveforms.
+  *
+  * Run: `sbt "runMain pwm_fade.PwmFadeSim"` (or `make sim-top`).
+  */
 object PwmFadeSim {
   def main(args: Array[String]): Unit = {
 
