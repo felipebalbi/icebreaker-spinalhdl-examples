@@ -8,12 +8,17 @@ object PwmFadeSim {
   def main(args: Array[String]): Unit = {
 
     // Use a small width and tiny prescaler so a full breath fits in sim.
-    val width          = 8
+    val cfg = ModulatorConfig(
+      kind  = ShaperKind.Gamma,
+      width = 8,
+      step  = 4,
+      gamma = 2.2
+    )
     val prescalerWidth = 2
 
     SimConfig
       .withWave
-      .compile(PwmFadeTop(width = width, prescalerWidth = prescalerWidth))
+      .compile(PwmFadeTop(cfg = cfg, prescalerWidth = prescalerWidth))
       .doSim { dut =>
 
         // Clock (since Pwm has implicit clock domain)
