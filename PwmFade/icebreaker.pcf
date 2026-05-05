@@ -1,0 +1,9 @@
+# 12 MHz clock
+set_io io_clk        35
+set_frequency io_clk 12
+
+# pwm
+set_io io_pwm        11
+
+# reset
+set_io reset         10
