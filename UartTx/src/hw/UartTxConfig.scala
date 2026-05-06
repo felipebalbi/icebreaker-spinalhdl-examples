@@ -9,6 +9,6 @@ case class UartTxConfig(
   stopBits   : Int = 1,
   parity     : ParityType = ParityType.None
 ) {
-  val ticksPerBit: Int = clkFreqHz / baudRate
+  val ticksPerBit: Int = clockFreqHz / baudRate
   require (ticksPerBit >= 1, "clock must be at least baudRate")
 }
