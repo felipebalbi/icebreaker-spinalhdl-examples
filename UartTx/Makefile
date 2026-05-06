@@ -1,5 +1,5 @@
 PACKAGE := uart_tx
-TOP     := UartTxTop
+TOP     := UartTx
 SIM_MAIN := UartTxSim
 SRC_DIR := src
 GEN_DIR := gen
@@ -51,7 +51,12 @@ $(ASC): $(JSON) $(PCF)
 $(BIN): $(ASC)
 	$(ICEPACK) $< $@
 
-sim:
+sim: sim-baud
+
+sim-baud:
+	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorSim"
+
+sim-top:
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 
 # Flash

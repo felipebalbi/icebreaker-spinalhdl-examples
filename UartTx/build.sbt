@@ -10,7 +10,7 @@ val spinalIdslPlugin = compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-
 
 lazy val projectname = (project in file("."))
   .settings(
-    name := "pwm_fade",
+    name := "uart_tx",
 
     Compile / scalaSource := baseDirectory.value / "src",
 
