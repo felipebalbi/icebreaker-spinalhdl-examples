@@ -6,25 +6,35 @@ import spinal.lib.fsm._
 
 /** UART transmit frame sequencer (the "control" half of the TX path).
   *
-  * Sequences the line through `Idle → Start → Data×N → Stop×M → Idle`,
-  * one bit boundary per [[BaudGenerator]] tick. Knows nothing about how
-  * the tick is generated, nothing about how the byte is stored
+  * Sequences the line through
+  * `Idle → Start → Data×N → [Parity] → Stop×M → Idle`, one bit
+  * boundary per [[BaudGenerator]] tick. Knows nothing about how the
+  * tick is generated, nothing about how the byte is stored
   * ([[TxShiftReg]]), and nothing about the byte-stream handshake — all
   * three concerns live in [[UartTx]] which wires this FSM, the baud
   * generator, and the shift register together.
   *
-  * Frame on the wire (8N1 by default):
+  * Frame on the wire (8N1 by default; parity slot present only when
+  * `cfg.parity != ParityType.None`):
   * {{{
-  *   idle  : line stays high
-  *   start : single low bit, one bit period long
-  *   data  : `cfg.dataBits` bits, LSB first  (UART convention)
-  *   stop  : `cfg.stopBits` high bits
-  *   idle  : line returns high
+  *   idle   : line stays high
+  *   start  : single low bit, one bit period long
+  *   data   : `cfg.dataBits` bits, LSB first  (UART convention)
+  *   parity : (optional) one bit; even/odd makes total 1-count even/odd
+  *   stop   : `cfg.stopBits` high bits
+  *   idle   : line returns high
   * }}}
   *
-  * Parity is not yet implemented; see the `// TODO parity` marker in
-  * `dataState` for where the parity slot would go. `cfg.parity` is
-  * accepted by the config but currently ignored by this FSM.
+  * == Parity ==
+  *
+  * Implemented as an FSM-local accumulator. On entry to `dataState`,
+  * `parityBit` is seeded to `False` for Even or `True` for Odd. On
+  * each Data tick (including the final one), the current data bit is
+  * XOR'd into `parityBit`. By the time the FSM hands over to
+  * `parityState`, `parityBit` holds the bit to transmit:
+  * `xor(data)` for Even, `~xor(data)` for Odd. For
+  * `ParityType.None` the seed and accumulate are elided at
+  * elaboration time and `parityState` is unreachable.
   *
   * == Timing contract with the rest of UartTx ==
   *
@@ -97,7 +107,7 @@ import spinal.lib.fsm._
   *
   * == Sub-blocks called out in TODO.md ==
   *
-  *   - Parity (see `// TODO parity` below).
+  *   - Parity: implemented (Even / Odd / None, see "Parity" above).
   *   - `cfg.stopBits` is honoured (1 or 2), enforced by `UartTxConfig`.
   *   - The wrapper-level Stream/CTS handshake is `UartTx`'s problem,
   *     not ours.
@@ -200,6 +210,12 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
   // Stop.
   val stopCounter = Reg(UInt(log2Up(cfg.stopBits + 1) bits)) init (0)
 
+  // Parity bit driven on the line during `parityState`. Always
+  // declared so the FSM elaborates uniformly across all `cfg.parity`
+  // values; for `ParityType.None` the register is unused and gets
+  // optimised away by synthesis.
+  val parityBit = Reg(Bool()) init (False)
+
   // --------------------------------------------------------------------------
   // Combinational defaults
   //
@@ -255,6 +271,14 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
     val dataState: State = new State {
       onEntry {
         bitCounter := 0
+
+        // Reset the parity accumulator so it starts clean each frame.
+        // Only needed (and only emitted) when parity is enabled — for
+        // ParityType.None this whole block is elided at elaboration
+        // time and `parityBit` is left to be optimised away.
+        if (cfg.parity != ParityType.None) {
+          parityBit := Bool(cfg.parity == ParityType.Odd)
+        }
       }
 
       whenIsActive {
@@ -267,26 +291,52 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
         txReg := io.shiftRegBit
 
         when(io.tick) {
+          if (cfg.parity != ParityType.None) {
+            parityBit := parityBit ^ io.shiftRegBit
+          }
+
           when(bitCounter === cfg.dataBits - 1) {
             // Final data tick. Don't pulse `shiftReg` (the register
             // isn't sampled again until the next `loadReg`, so an
             // extra shift would be harmless but waveform-noisy) and
             // don't bump the counter (it's about to be reset on the
-            // next Data entry anyway). Just hand over to Stop.
+            // next Data entry anyway). Hand over to Parity if it's
+            // enabled, otherwise straight to Stop.
             //
-            // TODO parity: when `cfg.parity != ParityType.None`,
-            // replace this `goto(stopState)` with `goto(parityState)`
-            // and add a new `parityState` between Data and Stop.
-            // parityState's whenIsActive should drive `txReg` to the
-            // precomputed parity bit — easiest implementation is to
-            // capture `data.xorR ^ (cfg.parity == ParityType.Odd)`
-            // into a register at `loadReg` time and use that here.
-            // On parityState's first tick, `goto(stopState)`.
-            goto(stopState)
+            // The choice is elaboration-time: for ParityType.None
+            // the `goto(parityState)` arm doesn't exist in the
+            // generated Verilog at all, so the parity state ends up
+            // unreachable and is optimised away.
+            if (cfg.parity == ParityType.None) {
+              goto(stopState)
+            } else {
+              goto(parityState)
+            }
           } otherwise {
             io.shiftReg := True
             bitCounter  := bitCounter + 1
           }
+        }
+      }
+    }
+
+    // ---------------- Parity ------------------------------------------------
+    //
+    // Always declared (keeps the FSM elaboration uniform). Only
+    // entered when `cfg.parity != ParityType.None` — see the
+    // elaboration-time `if` in `dataState`'s final-tick branch. For
+    // `None` the state is unreachable and synthesises away.
+    //
+    // `parityBit` was seeded on Data entry and accumulated on each
+    // Data tick, so by the time we get here it already holds the bit
+    // to transmit. We just drive it onto `txReg` from `whenIsActive`
+    // (same 1-cycle pipeline rationale as every other state) and
+    // hand over to Stop on the next tick.
+    val parityState: State = new State {
+      whenIsActive {
+        txReg := parityBit
+        when(io.tick) {
+          goto(stopState)
         }
       }
     }
