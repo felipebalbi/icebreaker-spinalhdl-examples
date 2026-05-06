@@ -70,6 +70,9 @@ formal: formal-baud formal-shiftreg
 formal-baud:
 	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorFormal"
 
+formal-baud-prove:
+	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorProve"
+
 formal-shiftreg:
 	$(SBT) -batch "runMain $(PACKAGE).TxShiftRegFormal"
 

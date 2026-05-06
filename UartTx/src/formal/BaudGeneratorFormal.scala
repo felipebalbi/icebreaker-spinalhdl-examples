@@ -49,6 +49,7 @@ object BaudGeneratorFormal extends App {
     .withBMC(30)
     .withCover(20)
     .doVerify(new Component {
+      setDefinitionName("BaudGeneratorFormal")
 
       // FormalDut wraps the design and exposes its internals so we
       // can both drive its inputs (anyseq by default) and observe

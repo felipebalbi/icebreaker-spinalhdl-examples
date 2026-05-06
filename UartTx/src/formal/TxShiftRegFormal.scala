@@ -49,6 +49,7 @@ object TxShiftRegFormal extends App {
     .withBMC(25)
     .withCover(20)
     .doVerify(new Component {
+      setDefinitionName("TxShiftRegFormal")
 
       val dut = FormalDut(TxShiftReg(cfg))
 
