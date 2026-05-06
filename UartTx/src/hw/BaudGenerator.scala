@@ -36,31 +36,35 @@ import spinal.core._
   *                  baud rate (and slightly more LUTs). 24 is plenty for
   *                  any realistic UART.
   */
-case class BaudGenerator(cfg: UartTxConfig, accWidth: Int = 24) extends Component {
+case class BaudGenerator(cfg: UartTxConfig, accWidth: Int = 24)
+    extends Component {
   val io = new Bundle {
-    /** Hold low to keep the generator quiescent (acc = 0, no ticks).
-      * Raise high to start producing ticks at the configured baud. The
-      * TX FSM holds this low when idle and raises it the cycle a byte
-      * is accepted, so the *first* tick lands a clean full bit period
-      * later — giving a properly-sized start bit.
-      */
-    val enable = in Bool()
 
-    /** One-cycle pulse, on average once every `clkFreqHz / baudRate`
-      * cycles. Registered, so glitch-free.
+    /** Hold low to keep the generator quiescent (acc = 0, no ticks). Raise high
+      * to start producing ticks at the configured baud. The TX FSM holds this
+      * low when idle and raises it the cycle a byte is accepted, so the *first*
+      * tick lands a clean full bit period later — giving a properly-sized start
+      * bit.
       */
-    val tick   = out Bool()
+    val enable = in Bool ()
+
+    /** One-cycle pulse, on average once every `clkFreqHz / baudRate` cycles.
+      * Registered, so glitch-free.
+      */
+    val tick = out Bool ()
   }
 
   // Round-to-nearest gives slightly better long-term accuracy than the
   // default truncating integer division. Difference is microscopic at
   // accWidth=24 but free, so why not.
   val phaseInc: Long = (
-    ((BigInt(cfg.baudRate) << accWidth) + (BigInt(cfg.clkFreqHz) >> 1)) / cfg.clkFreqHz
+    ((BigInt(cfg.baudRate) << accWidth) + (BigInt(
+      cfg.clkFreqHz
+    ) >> 1)) / cfg.clkFreqHz
   ).toLong
 
   /** Phase accumulator. The extra MSB captures overflow from the add. */
-  val acc = Reg(UInt(accWidth + 1 bits)) init(0)
+  val acc = Reg(UInt(accWidth + 1 bits)) init (0)
 
   when(!io.enable) {
     acc := 0
@@ -73,5 +77,5 @@ case class BaudGenerator(cfg: UartTxConfig, accWidth: Int = 24) extends Componen
 
   // Register the tick to keep the output glitch-free and timing clean.
   // Costs 1 cycle of latency, irrelevant at baud-rate timescales.
-  io.tick := RegNext(acc.msb) init(False)
+  io.tick := RegNext(acc.msb) init (False)
 }

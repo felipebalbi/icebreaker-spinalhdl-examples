@@ -56,6 +56,9 @@ sim: sim-baud
 sim-baud:
 	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorSim"
 
+sim-shiftreg:
+	$(SBT) -batch "runMain $(PACKAGE).TxShiftRegSim"
+
 sim-top:
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 

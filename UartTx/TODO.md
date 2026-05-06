@@ -19,7 +19,7 @@ Order is bottom-up: each block is self-testable before the next one needs it.
 
 ---
 
-## 🔲 Step 2 — `TxShiftReg`
+## ✅ Step 2 — `TxShiftReg`
 
 **Goal:** parallel-load a byte, then expose one bit per shift pulse, LSB
 first.
