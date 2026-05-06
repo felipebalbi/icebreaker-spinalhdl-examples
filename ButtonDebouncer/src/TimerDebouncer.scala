@@ -4,8 +4,8 @@ import spinal.core._
 import spinal.lib._
 
 case class TimerDebouncer(
-  clkFreqHz: Int,
-  debounceMs: Int,
+    clkFreqHz: Int,
+    debounceMs: Int
 ) extends Debouncer {
   // Synchronize button input
   val btnSync = BufferCC(io.raw)
@@ -17,10 +17,10 @@ case class TimerDebouncer(
   val maxCount = if (debounceCycles <= 1) 1 else debounceCycles
 
   // Define a cycle counter
-  val counter = Reg(UInt(log2Up(maxCount) bits)) init(0)
+  val counter = Reg(UInt(log2Up(maxCount) bits)) init (0)
 
-  val state = Reg(Bool()) init(False)
-  val candidate = Reg(Bool()) init(False)
+  val state = Reg(Bool()) init (False)
+  val candidate = Reg(Bool()) init (False)
 
   when(btnSync =/= candidate) {
     candidate := btnSync
@@ -35,7 +35,7 @@ case class TimerDebouncer(
 
   io.stable := state
 
-  val prev = RegNext(state) init(False)
+  val prev = RegNext(state) init (False)
 
   io.rising := state && !prev
   io.falling := !state && prev

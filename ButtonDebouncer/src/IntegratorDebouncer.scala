@@ -5,7 +5,7 @@ import spinal.lib._
 
 case class IntegratorDebouncer(width: Int = 16) extends Debouncer {
   val btnSync = BufferCC(io.raw)
-  val counter = Reg(UInt(width bits)) init(0)
+  val counter = Reg(UInt(width bits)) init (0)
 
   when(btnSync) {
     when(counter =/= counter.maxValue) {
@@ -17,7 +17,7 @@ case class IntegratorDebouncer(width: Int = 16) extends Debouncer {
     }
   }
 
-  val state = Reg(Bool()) init(False)
+  val state = Reg(Bool()) init (False)
 
   when(counter === counter.maxValue) {
     state := True
@@ -29,7 +29,7 @@ case class IntegratorDebouncer(width: Int = 16) extends Debouncer {
 
   io.stable := state
 
-  val prev = RegNext(state) init(False)
+  val prev = RegNext(state) init (False)
 
   io.rising := state && !prev
   io.falling := !state && prev

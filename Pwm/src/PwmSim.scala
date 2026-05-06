@@ -9,18 +9,16 @@ object PwmSim {
 
     val width = 8
 
-    SimConfig
-      .withWave
+    SimConfig.withWave
       .compile(PwmTop(width))
       .doSim { dut =>
-
         // Clock (since Pwm has implicit clock domain)
         dut.clockDomain.forkStimulus(period = 10)
 
         // Sweep duty cycle quickly
         for (i <- 0 until (1 << width)) {
           dut.io.duty #= i
-          sleep(50)   // fast sweep
+          sleep(50) // fast sweep
         }
 
         sleep(500)

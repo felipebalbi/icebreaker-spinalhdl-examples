@@ -5,9 +5,9 @@ import spinal.lib._
 
 case class ButtonTop() extends Component {
   val io = new Bundle {
-    val clk = in Bool()
-    val btn = in Bool()
-    val led = out Bool()
+    val clk = in Bool ()
+    val btn = in Bool ()
+    val led = out Bool ()
   }
 
   // Single clock domain (12 MHz)
@@ -24,7 +24,7 @@ case class ButtonTop() extends Component {
     val rising = io.btn && !btnPrev
 
     // LED state
-    val ledReg = Reg(Bool()) init(False)
+    val ledReg = Reg(Bool()) init (False)
 
     when(rising) {
       ledReg := !ledReg

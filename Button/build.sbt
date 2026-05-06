@@ -6,7 +6,9 @@ val spinalVersion = "1.14.1"
 
 val spinalCore = "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion
 val spinalLib = "com.github.spinalhdl" %% "spinalhdl-lib" % spinalVersion
-val spinalIdslPlugin = compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion)
+val spinalIdslPlugin = compilerPlugin(
+  "com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion
+)
 
 lazy val projectname = (project in file("."))
   .settings(
@@ -17,7 +19,9 @@ lazy val projectname = (project in file("."))
     libraryDependencies ++= Seq(
       "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion,
       "com.github.spinalhdl" %% "spinalhdl-lib" % spinalVersion,
-      compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion)
+      compilerPlugin(
+        "com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion
+      )
     )
   )
 
