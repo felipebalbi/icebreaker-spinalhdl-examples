@@ -5,7 +5,7 @@ import spinal.core._
 /** BaudGenerator: Direct Digital Synthesis (DDS) implementation.
   * 
   */
-case class BaudGenerator(cfg: UartConfig, accWidth: Int = 24) extends Component {
+case class BaudGenerator(cfg: UartTxConfig, accWidth: Int = 24) extends Component {
   val io = new Bundle {
     val enable = in Bool()   // gate the counter
     val tick   = out Bool()  // 1-cycle pulse, once per bit period
