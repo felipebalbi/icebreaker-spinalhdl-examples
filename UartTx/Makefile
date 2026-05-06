@@ -62,6 +62,17 @@ sim-shiftreg:
 sim-top:
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 
+# Formal verification (requires yosys + sby on PATH).
+# Each target generates SystemVerilog + an .sby script under
+# simWorkspace/ and invokes SymbiYosys to run BMC + cover.
+formal: formal-baud formal-shiftreg
+
+formal-baud:
+	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorFormal"
+
+formal-shiftreg:
+	$(SBT) -batch "runMain $(PACKAGE).TxShiftRegFormal"
+
 # Flash
 flash: $(BIN)
 	$(ICEPROG) $<
