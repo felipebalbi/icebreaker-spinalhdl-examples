@@ -51,13 +51,16 @@ $(ASC): $(JSON) $(PCF)
 $(BIN): $(ASC)
 	$(ICEPACK) $< $@
 
-sim: sim-baud
+sim: sim-baud sim-shiftreg sim-fsm
 
 sim-baud:
 	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorSim"
 
 sim-shiftreg:
 	$(SBT) -batch "runMain $(PACKAGE).TxShiftRegSim"
+
+sim-fsm:
+	$(SBT) -batch "runMain $(PACKAGE).TxFsmSim"
 
 sim-top:
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
