@@ -46,7 +46,12 @@ object TxShiftRegSim {
 
         // ---------- helpers ----------------------------------------------
 
-        /** Pulse load=1 for one cycle with `value` on data. */
+        /** Pulse load=1 for one cycle with `value` on data, then wait one
+          * extra cycle so that the combinational `io.bit := shiftReg(0)`
+          * has fully settled to the newly-loaded LSB. Necessary because
+          * `io.bit` is combinational off the register; reads issued in
+          * the same delta as the register update can race.
+          */
         def loadByte(value: Int): Unit = {
           dut.io.data  #= value
           dut.io.load  #= true
@@ -54,12 +59,15 @@ object TxShiftRegSim {
           dut.clockDomain.waitSampling()
           dut.io.load  #= false
           dut.io.data  #= 0
+          dut.clockDomain.waitSampling()
         }
 
         /** Read 8 bits LSB-first by repeatedly shifting, asserting each
           * matches the expected bit of `value`. After load, the LSB is
           * already visible on `io.bit` — we sample, then shift to expose
-          * the next bit.
+          * the next bit. The trailing `waitSampling()` after dropping
+          * `shift` gives the combinational `io.bit` a settled cycle
+          * before the next iteration's read.
           */
         def expectByte(value: Int, label: String): Unit = {
           for (i <- 0 until cfg.dataBits) {
@@ -69,10 +77,10 @@ object TxShiftRegSim {
               got == expected,
               f"[$label, byte=0x$value%02X] bit $i: expected $expected, got $got"
             )
-            // Shift to expose bit (i+1).
             dut.io.shift #= true
             dut.clockDomain.waitSampling()
             dut.io.shift #= false
+            dut.clockDomain.waitSampling()
           }
         }
 
@@ -80,7 +88,10 @@ object TxShiftRegSim {
         dut.io.load  #= false
         dut.io.shift #= false
         dut.io.data  #= 0
-        dut.clockDomain.waitSampling(2)
+        // forkStimulus holds reset asserted for ~10 cycles by default.
+        // Wait well past that so the register's `init(0xff)` value is
+        // actually present and subsequent loads are not suppressed.
+        dut.clockDomain.waitSampling(20)
 
         // ---------- (1) + (2) per-pattern shift-out tests ----------------
         val patterns = Seq(0x00, 0xff, 0xaa, 0x55, 0x80, 0x01, 0xad)
@@ -112,6 +123,7 @@ object TxShiftRegSim {
         dut.io.load  #= false
         dut.io.shift #= false
         dut.io.data  #= 0
+        dut.clockDomain.waitSampling() // settle combinational io.bit
         assert(
           dut.io.bit.toBoolean,
           f"load-priority test: expected bit=1 (LSB of 0x$newByte%02X), got 0 — shift won over load"
