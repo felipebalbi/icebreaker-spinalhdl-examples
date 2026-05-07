@@ -98,17 +98,33 @@ val io = new Bundle {
 
 ---
 
-## 🔲 Step 4 — Wire it all together inside `UartTx`
+## ✅ Step 4 — Wire it all together inside `UartTx`
 
-**File:** edit `src/hw/UartTx.scala` (replace the stub body).
+**File:** `src/hw/UartTx.scala`
 
-**Composition sketch:**
+**What landed:**
+- Composition: `BaudGenerator + TxShiftReg + TxFsm`. Wiring per the
+  sketch below — `enable := busy`, `ready := canStart`, single-cycle
+  Stream accept, payload latched into `TxShiftReg` the same cycle the
+  FSM enters Start.
+- **Optional CTS** via new `cfg.useCts: Boolean = true`. When set,
+  the `cts` input pin exists and `canStart = !busy && cts`. When
+  `false`, the port is omitted entirely (`cfg.useCts generate
+  (in Bool())`) and the gate becomes a no-op (`ctsOk = True`) that
+  synthesises away. Default `true` keeps existing call sites
+  unchanged.
+- CTS gates only the *start* of new frames; an in-flight frame
+  cannot be aborted mid-transmission.
+- Top-of-file Scaladoc and per-IO comments updated to reflect that
+  parity is wired and CTS is used.
+
+**Composition (current):**
 ```scala
 val baud = BaudGenerator(cfg)
 val sreg = TxShiftReg(cfg)
 val fsm  = TxFsm(cfg)
 
-baud.io.enable    := fsm.io.busy        // tick only while transmitting
+baud.io.enable    := fsm.io.busy
 fsm.io.tick       := baud.io.tick
 
 sreg.io.load      := fsm.io.loadReg
@@ -116,37 +132,27 @@ sreg.io.data      := io.data.payload
 sreg.io.shift     := fsm.io.shiftReg
 fsm.io.shiftRegBit := sreg.io.bit
 
-// Stream handshake + CTS gating
-val canStart      = !fsm.io.busy && io.cts
+val ctsOk         = if (cfg.useCts) io.cts else True
+val canStart      = !fsm.io.busy && ctsOk
 fsm.io.start      := io.data.valid && canStart
-io.data.ready     := canStart           // accept the cycle FSM starts
+io.data.ready     := canStart
 
 io.tx             := fsm.io.txBit
 ```
 
-**Why `enable := busy`:**
-Holding the BaudGenerator quiescent during Idle ensures the *first* tick
-after `start` lands a clean full bit period later → start bit is exactly
-one bit period wide. This is exactly the bug the `enable` input was added
-to prevent. (Verify in sim: a frame's start bit should be ≥ ticksPerBit
-clocks wide, never truncated.)
+**Sim (`src/sim/UartTxSim.scala`):**
+- Black-box test of the wrapper: drive the Stream, watch `io.tx`,
+  recover frames via mid-bit sampling (the same way a real RX does).
+  Real BaudGenerator / TxShiftReg / TxFsm all in the loop.
+- Tests: idle-high smoke, single-byte round trip across patterns
+  (0x00/0xFF/0xAA/0x55/0xAD), back-to-back transmission with
+  continuous `data.valid`, ready/valid handshake timing, **CTS
+  blocks new frame** (with-CTS configs only), **CTS dropped
+  mid-frame doesn't abort**, brief 8N1/8N2/8E1/8O1 config-matrix
+  smoke, plus a `useCts=false` smoke confirming the optional port
+  idiom works.
 
-**Why `ready := canStart` (combinational):**
-The Stream transfer happens the same cycle the FSM enters Start. The byte
-on `data.payload` is latched into `TxShiftReg` via `loadReg` that same
-cycle. Single-cycle accept, no buffering needed.
-
-**End-to-end sim (`src/sim/UartTxSim.scala`):**
-- Drive the Stream with a sequence of bytes (e.g. `"Hello"` then random).
-- Sample `io.tx` at the *middle* of each bit period
-  (`ticksPerBit/2` cycles after each start-edge falling) and reconstruct
-  the byte. Compare against what you sent.
-- Tie `cts` high.
-- **CTS test:** drop `cts` between frames — the next frame should wait.
-  Drop `cts` mid-frame — should NOT abort the in-flight frame (CTS only
-  gates the *start* of new ones).
-- **Back-to-back test:** keep `data.valid` high across multiple bytes,
-  verify each one arrives intact with no missing/extra bit periods.
+**Makefile:** `sim-top` target included in the `sim` aggregate.
 
 ---
 

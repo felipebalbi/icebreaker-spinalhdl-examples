@@ -9,8 +9,6 @@ import spinal.core._
   *     parity) is even.
   *   - `Odd` : parity bit set so that the *total* count of 1s in (data +
   *     parity) is odd.
-  *
-  * Currently only declared — the FSM does not yet emit a parity bit.
   */
 object ParityType extends SpinalEnum {
   val None, Even, Odd = newElement()
@@ -35,14 +33,23 @@ object ParityType extends SpinalEnum {
   *   Number of stop bits (1 or 2). Stop bits are just extra high-level idle
   *   time at the end of a frame.
   * @param parity
-  *   Parity scheme. Currently unused until the FSM adds the parity-bit slot.
+  *   Parity scheme — see [[ParityType]]. Drives both the parity bit on the
+  *   wire and whether a `parityState` exists in the FSM at all.
+  * @param useCts
+  *   If `true` (default), expose a `cts` input pin and gate the start of
+  *   each frame on it being high (active-high "I can receive"). If
+  *   `false`, the `cts` port is omitted entirely and frames start as
+  *   soon as a byte is offered. Set this to `false` for connections
+  *   where the far end has no flow control, or to save a top-level pin
+  *   on the FPGA.
   */
 case class UartTxConfig(
     clkFreqHz: Int = 12000000,
     baudRate: Int = 115200,
     dataBits: Int = 8,
     stopBits: Int = 1,
-    parity: ParityType.E = ParityType.None
+    parity: ParityType.E = ParityType.None,
+    useCts: Boolean = true
 ) {
 
   /** Average number of system-clock cycles per UART bit period.
