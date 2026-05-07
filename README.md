@@ -14,13 +14,42 @@ can build, simulate, or flash it independently.
 
 In rough order of complexity (later ones build on patterns introduced earlier):
 
-| Project             | What it does                                                             | What it teaches                                                                                                                                                                                                                                                       |
-|---------------------|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Blinky**          | Toggles an LED at ~0.18 Hz from a counter MSB.                           | Minimal `Component` + `Bundle`; `Reg` with `init`; `BOOT` reset on iCE40.                                                                                                                                                                                             |
-| **Button**          | Toggles an LED on each (raw) button press.                               | Input pins; `BufferCC` for crossing the async button into clocked logic; `RegNext`; naive edge detection.                                                                                                                                                             |
-| **ButtonDebouncer** | Same, but with proper debouncing.                                        | Abstract `Component` + companion `apply(cfg)` factory; `SpinalEnum`; reusable IO `Bundle`; two debouncer styles (integrator vs timer).                                                                                                                                |
-| **Pwm**             | Counter-comparator PWM driving an LED.                                   | The PWM idiom; `SpinalSim` testbench (`forkStimulus`, `sleep`, waveform dump).                                                                                                                                                                                        |
-| **PwmFade**         | "Breathing" LED with a pluggable duty modulator (linear / sine / gamma). | Composing previous patterns; `Mem` with `readAsync` + LUTs built at elaboration; two-timebase design (PWM carrier + slow modulation tick); perceptual brightness with gamma; project layout split into `src/hw/` and `src/sim/`. See `PwmFade/README.md` for details. |
+**Blinky**
+: Toggles an LED at ~0.18 Hz from a counter MSB. Teaches a minimal
+  `Component` + `Bundle`; `Reg` with `init`; `BOOT` reset on iCE40.
+
+**Button**
+: Toggles an LED on each (raw) button press. Teaches input pins;
+  `BufferCC` for crossing the async button into clocked logic;
+  `RegNext`; naive edge detection.
+
+**ButtonDebouncer**
+: Same as Button, but with proper debouncing. Teaches abstract
+  `Component` + companion `apply(cfg)` factory; `SpinalEnum`; reusable
+  IO `Bundle`; two debouncer styles (integrator vs timer).
+
+**Pwm**
+: Counter-comparator PWM driving an LED. Teaches the PWM idiom;
+  `SpinalSim` testbench (`forkStimulus`, `sleep`, waveform dump).
+
+**PwmFade**
+: "Breathing" LED with a pluggable duty modulator (linear / sine /
+  gamma). Teaches composing previous patterns; `Mem` with `readAsync` +
+  LUTs built at elaboration; two-timebase design (PWM carrier + slow
+  modulation tick); perceptual brightness with gamma; project layout
+  split into `src/hw/` and `src/sim/`. See `PwmFade/README.md` for
+  details.
+
+**Uart**
+: A from-scratch UART (TX done, RX in progress) that talks to your
+  terminal over the iCEBreaker's USB-serial bridge. Walks through
+  designing each sub-block in isolation — `BaudGenerator`, `TxShiftReg`,
+  a parameterizable `UartConfig` — then wires them together in a
+  `UartTx` top-level. A separate `UartTxDemo` drives that core to
+  cheerfully spam "Hello, world\r\n" at your `screen` session. The
+  interesting part isn't the protocol (it's a shift register with
+  opinions); it's the workflow: spec → sub-block → simulation →
+  composition → bitstream → blinking cursor on real hardware.
 
 ## The board
 
