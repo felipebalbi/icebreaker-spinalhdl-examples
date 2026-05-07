@@ -278,13 +278,16 @@ object UartTxSim {
         )
 
         // Drive a single byte via sendByte (which blocks until the
-        // handshake commits, then drops valid). Immediately after the
-        // handshake, ready should be low for the duration of the frame.
+        // handshake commits, then drops valid). After sendByte returns
+        // we're at the *post-edge of the handshake cycle*, but
+        // `ready.toBoolean` here would still return the pre-edge value
+        // (true — what made the handshake fire). Advance one more
+        // sampling so we observe the cycle AFTER the handshake, where
+        // the FSM is in startState and ready has gone low. (Same
+        // SpinalSim read-semantics quirk that bit us in TxFsmSim.)
         val handshakeByte = 0x5a & ((1 << cfg.dataBits) - 1)
         sendByte(handshakeByte)
-        // sendByte exits the cycle the handshake completed. The FSM has
-        // moved from idle to start, so ready should be low now and stay
-        // low until the frame ends.
+        dut.clockDomain.waitSampling()
         assert(
           !dut.io.data.ready.toBoolean,
           s"[$cfgLabel] ready did not drop after handshake"
