@@ -214,7 +214,7 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
   // declared so the FSM elaborates uniformly across all `cfg.parity`
   // values; for `ParityType.None` the register is unused and gets
   // optimised away by synthesis.
-  val parityBit = Reg(Bool()) init (False)
+  val parityBit = Reg(Bool()) init (False) allowUnsetRegToAvoidLatch
 
   // --------------------------------------------------------------------------
   // Combinational defaults
