@@ -1,4 +1,4 @@
-PACKAGE  := uart_tx
+PACKAGE  := uart
 TOP      := UartTxDemo
 SIM_MAIN := UartTxSim
 SRC_DIR  := src

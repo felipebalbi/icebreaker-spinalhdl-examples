@@ -1,12 +1,15 @@
-# UartTx — TODO
+# Uart — TODO
 
-History and status of the UartTx build, plus optional follow-ups.
+History and status of the Uart project. Phase 1 (transmit-only) is
+done and running on real hardware. Phase 2 (receive + bidirectional
+demos) is the next bottom-up build, planned in Steps 6–10 below.
+
 Each completed step has a "What landed" summary so you can rediscover
 the design rationale without re-reading the source. Open items live
-under "Stretch goals" at the bottom.
+under "Phase 2 — UartRx" and "Stretch goals" at the bottom.
 
-Order is bottom-up: each block was self-tested before the next one
-needed it.
+Order is bottom-up: each block is self-tested before the next one
+needs it.
 
 ---
 
@@ -207,19 +210,212 @@ USB-UART).
 
 ---
 
-## 🔲 Stretch goals (optional, in roughly increasing complexity)
+## 🔲 Phase 2 — UartRx and bidirectional demos
+
+Same bottom-up rhythm as Phase 1: each block gets its own sim before
+the next one composes it. RX is genuinely harder than TX — the wire
+arrives on no clock you own, so you have to recover bit timing from
+the start-bit edge and oversample to land samples at bit-centers.
+
+**Cross-cutting decisions:**
+- **Config rename:** `UartTxConfig` → `UartConfig`. The file rename
+  (`UartTxConfig.scala` → `UartConfig.scala`) is already done as
+  part of the directory/package rename commit; the **case-class
+  name + field additions** (`oversample: Int = 16`, `useRts: Boolean = true`)
+  are the Step 0 work and need a sweep through every importer.
+- **Oversample factor:** `16×` (industry standard, balances jitter
+  tolerance vs. baud-clock divider granularity). New `oversample`
+  field on `UartConfig`.
+- **No new `BaudGenerator`** — instantiate the existing DDS-based one
+  with `freqDiv = clkFreqHz / (baudRate * oversample)` for RX. The
+  RxFsm counts oversample ticks itself.
+- **Error reporting:** RX exposes `framingError`, `parityError`, and
+  `overrun` as side-band flags pulsed for one cycle alongside `valid`.
+
+---
+
+### 🔲 Step 6 — `RxSync` (2-FF synchronizer)
+
+**File:** `src/hw/RxSync.scala`
+
+**Why:** the off-chip `rx` pin is async to our system clock. A direct
+sample is a metastability bug waiting to happen — shows up as random
+framing errors months later. Two back-to-back FFs collapse that risk
+to negligible MTBF.
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val asyncIn = in  Bool()  // direct from FPGA pin, no clock relation
+  val syncOut = out Bool()  // safe to use in our clock domain
+}
+```
+
+**Implementation:** literally `RegNext(RegNext(io.asyncIn, init = True))`.
+Init high so the line looks idle on reset (idle-high is a UART invariant).
+
+**Sim:** drive `asyncIn` with toggling pattern, verify `syncOut` is
+delayed by exactly 2 cycles and never drops/duplicates a transition.
+
+---
+
+### 🔲 Step 7 — `RxShiftReg`
+
+**File:** `src/hw/RxShiftReg.scala`
+
+**Why:** mirror of `TxShiftReg` but shifts *in*. Collects bits LSB-first
+into a register that, after `dataBits` shifts, contains the received
+byte ready to hand off.
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val clear  = in  Bool()                       // reset reg before each frame
+  val shift  = in  Bool()                       // 1-cycle pulse: capture sampleIn
+  val sample = in  Bool()                       // the bit value to shift in
+  val data   = out Bits(cfg.dataBits bits)      // assembled byte (valid after N shifts)
+}
+```
+
+**Logic:** on `shift`, `sreg := sample ## sreg(N-1 downto 1)` (LSB
+first, MSB ends up in bit N-1).
+
+**Sim:** clock in known patterns (0x55, 0xAA, 0xC3, …), verify the
+assembled byte after N shifts matches.
+
+---
+
+### 🔲 Step 8 — `RxFsm` (the heart of the receiver)
+
+**File:** `src/hw/RxFsm.scala`
+
+**Why:** drives RxShiftReg by sampling the synchronized rx line at
+bit-centers. All states use oversample ticks as the time base.
+
+**Suggested states:**
+- **IDLE:** wait for falling edge on syncRx (start-bit detected).
+- **START_VERIFY:** wait `oversample/2` ticks (half a bit) and re-sample.
+  - Still low → real start bit, advance to DATA.
+  - High → glitch, return to IDLE. *This is the key noise-rejection
+    trick; without it a 1-cycle line glitch corrupts a frame.*
+- **DATA:** every `oversample` ticks, pulse `shiftReg.shift`. Repeat
+  `dataBits` times.
+- **PARITY** (only if `cfg.parity != None`): one more sample, compare to
+  expected parity (XOR of data bits, optionally inverted for Even).
+  Latch `parityError` if mismatch.
+- **STOP:** after `oversample` ticks, sample. If low → `framingError`.
+  For 2 stop bits, check again after another `oversample` ticks.
+- **DONE:** present payload + flags as `valid` pulse. If downstream
+  `ready` is low when the next start-bit edge arrives → `overrun`.
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val rx           = in  Bool()                        // synchronized rx
+  val tick         = in  Bool()                        // oversample-rate strobe
+  val payload      = master Stream(Bits(cfg.dataBits bits))
+  val framingError = out Bool()                        // pulsed alongside valid
+  val parityError  = out Bool()                        // pulsed alongside valid
+  val overrun      = out Bool()                        // pulsed if start arrives while !ready
+  val busy         = out Bool()                        // diagnostic
+}
+```
+
+**Sim:** drive a fake UART line by hand. Test cases:
+- every-byte sweep (0x00..0xFF) at 8N1
+- 8N2, 8E1, 8O1 smoke
+- framing error (force stop bit low)
+- parity error (corrupt one data bit, leave parity unchanged)
+- glitch on idle line (1-cycle low) — must NOT trigger a frame
+- back-to-back frames with `ready` always-true (no overrun)
+- back-to-back frames with `ready` deasserted (overrun expected)
+- ±2% baud skew tolerance (slow the test driver, verify still decodes)
+
+---
+
+### 🔲 Step 9 — `UartRx` wrapper
+
+**File:** `src/hw/UartRx.scala`
+
+**Why:** symmetrical wrapper to `UartTx`. Composes `RxSync` +
+`BaudGenerator` (at oversample rate) + `RxShiftReg` + `RxFsm`.
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val rx           = in  Bool()                       // FPGA pin
+  val payload      = master Stream(Bits(cfg.dataBits bits))
+  val rts          = cfg.useRts generate (out Bool())  // mirror of useCts
+  val framingError = out Bool()
+  val parityError  = out Bool()
+  val overrun      = out Bool()
+}
+```
+
+**Optional `useRts`:** symmetric to `useCts` on TX. RTS goes low when
+downstream isn't ready, telling the other side to stop sending.
+Use the same `Bool generate (out Bool())` idiom from `UartTx`.
+
+**Sim:** black-box driver synthesizes UART frames on `io.rx`, walks
+the same test matrix as RxFsm but at the wrapper level (proves all
+the sub-blocks are wired correctly).
+
+---
+
+### 🔲 Step 10 — Demos
+
+Three small synthesizable tops, each picking up where Phase 1's
+`UartTxDemo` left off. All use the explicit ClockDomain pattern from
+`UartTxDemo` (RISING / ASYNC / active-LOW reset).
+
+**10a. `UartRxDemo` — receive only, drive LEDs**
+- Wires the iCEbreaker's onboard `rx` pin to `UartRx`.
+- Sinks the payload Stream into the 3 onboard LEDs (R/G/B = received
+  byte's lower 3 bits, latched). Bonus: blink one of them on
+  `framingError` so corruption is visible at a glance.
+- Hardware test: type characters in `picocom`, watch LEDs change.
+
+**10b. `UartEchoDemo` — RX → FIFO → TX**
+- Wires `UartRx.payload` straight into a `StreamFifo` and out to
+  `UartTx.io.data`.
+- The simplest end-to-end proof: `picocom` types "hello", sees "hello"
+  back. Catches almost every wiring bug.
+
+**10c. `UartDemo` — both directions, independent**
+- Composes one `UartTx` (with `UartTxDemo`'s message ROM still
+  broadcasting) **and** one `UartRx` (echoing input via a small
+  command interpreter, or just forwarding to LEDs).
+- Demonstrates that TX and RX truly run independently, with no
+  shared state, on a single FPGA.
+- Pick which behaviour to ship at implementation time — the
+  scaffolding (clock domain, both wrappers, FIFO between them if
+  desired) is the same.
+
+**`pcf` updates:** add `io_rx` (iCEbreaker FT2232 host→FPGA pin) for
+all three demos. Add the LED pins for 10a/10c.
+
+---
+
+## 🔲 Stretch goals (optional)
 
 - [x] ~~**Internal `StreamFifo`** so bursty producers don't stall.~~
       *Resolved by composition* — `UartTxDemo` instantiates one
       externally instead. See Step 5 above.
+- [x] ~~**Loopback testbench**~~ — superseded by Step 10b
+      (`UartEchoDemo`), which is the same idea promoted from a
+      pure-sim toy to a real hardware demo.
+- [x] ~~**UartRx**~~ — promoted to Phase 2 above (Steps 6–9).
+- [x] ~~**Full `Uart` wrapper**~~ — addressed by Step 10c
+      (`UartDemo`) which composes both directions at the integration
+      layer rather than hiding them behind one bundled module.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
-      `BaudGeneratorCounter`, parameterise UartTx to pick one,
-      compare LUT usage in `nextpnr-ice40` reports vs. DDS.
-- [ ] **Loopback testbench:** instantiate UartTx → wire → minimal UartRx
-      model in sim and verify byte-perfect transfer at the byte level.
-- [ ] **UartRx** as its own bottom-up exercise (start-bit detection with
-      16× oversampling, mid-bit sampling, framing-error detection).
-- [ ] **Full `Uart` wrapper** combining TX+RX with proper RTS/CTS.
+      `BaudGeneratorCounter`, parameterise to pick one, compare LUT
+      usage in `nextpnr-ice40` reports vs. DDS.
+- [ ] **Rename `UartTxConfig` → `UartConfig`** (file already renamed
+      to `UartConfig.scala` as part of the directory/package rename
+      commit — still need to update the case-class name and add
+      `oversample`/`useRts` fields). Touches every importer; do it
+      as a single sweep at the start of Step 6 (formally Step 0).
 
 ---
 

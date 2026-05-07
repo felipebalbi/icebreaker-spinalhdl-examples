@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 import spinal.lib._
@@ -92,7 +92,7 @@ case class UartTx(cfg: UartTxConfig) extends Component {
   * exists (clock domain + pin mapping for the iCE40), swap the
   * `generateVerilog(...)` argument to that.
   *
-  * Run with: `sbt "runMain uart_tx.UartTxTopVerilog"` (or `make`).
+  * Run with: `sbt "runMain uart.UartTxVerilog"` (or `make`).
   */
 object UartTxVerilog {
   def main(args: Array[String]): Unit = {

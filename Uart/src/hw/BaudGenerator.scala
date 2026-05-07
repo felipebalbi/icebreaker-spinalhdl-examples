@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 

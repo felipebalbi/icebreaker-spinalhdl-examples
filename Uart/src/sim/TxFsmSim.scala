@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 import spinal.core.sim._
@@ -50,7 +50,7 @@ import spinal.core.sim._
   * "Parity" section in TxFsm's top-of-file comment), so all parity-enabled
   * configs in `main` (8E1/8E2/8O1/8O2/5E1/5E2/5O1/5O2) are expected to pass.
   *
-  * Run: `sbt "runMain uart_tx.TxFsmSim"`
+  * Run: `sbt "runMain uart.TxFsmSim"`
   */
 object TxFsmSim {
 

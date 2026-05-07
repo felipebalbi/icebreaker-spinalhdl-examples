@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 import spinal.core.sim._
@@ -50,7 +50,7 @@ import spinal.core.sim._
   * a real UART RX does, and it tolerates the 1-cycle pipeline delay introduced
   * by `TxFsm`'s registered txReg without any special accounting in the test.
   *
-  * Run: `sbt "runMain uart_tx.UartTxSim"`
+  * Run: `sbt "runMain uart.UartTxSim"`
   */
 object UartTxSim {
 

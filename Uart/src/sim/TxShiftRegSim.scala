@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 import spinal.core.sim._
@@ -30,7 +30,7 @@ import spinal.core.sim._
   * shift loop therefore: sample, drive shift=1, waitSampling (this is the cycle
   * the shift commits), drop shift. One cycle per shift, no wasted cycles.
   *
-  * Run: `sbt "runMain uart_tx.TxShiftRegSim"`
+  * Run: `sbt "runMain uart.TxShiftRegSim"`
   */
 object TxShiftRegSim {
   def main(args: Array[String]): Unit = {

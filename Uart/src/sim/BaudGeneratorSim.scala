@@ -1,4 +1,4 @@
-package uart_tx
+package uart
 
 import spinal.core._
 import spinal.core.sim._
@@ -23,7 +23,7 @@ import spinal.core.sim._
   *   6. Dropping `enable` cleanly stops ticks; re-enabling restarts the cadence
   *      from a known phase.
   *
-  * Run: `sbt "runMain uart_tx.BaudGeneratorSim"`
+  * Run: `sbt "runMain uart.BaudGeneratorSim"`
   */
 object BaudGeneratorSim {
   def main(args: Array[String]): Unit = {

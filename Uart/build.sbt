@@ -12,7 +12,7 @@ val spinalIdslPlugin = compilerPlugin(
 
 lazy val projectname = (project in file("."))
   .settings(
-    name := "uart_tx",
+    name := "uart",
     Compile / scalaSource := baseDirectory.value / "src",
     libraryDependencies ++= Seq(
       spinalCore,
