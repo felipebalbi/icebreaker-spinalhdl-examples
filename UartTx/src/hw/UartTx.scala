@@ -56,10 +56,24 @@ case class UartTx(cfg: UartTxConfig) extends Component {
     val cts = in Bool ()
   }
 
-  // ---- Stub body so the module elaborates while sub-blocks are TODO. ----
-  // Will be replaced by: BaudGenerator instance + shift register + FSM.
-  io.tx := True
-  io.data.ready := False
+  val baud = BaudGenerator(cfg)
+  val sreg = TxShiftReg(cfg)
+  val fsm = TxFsm(cfg)
+
+  baud.io.enable := fsm.io.busy // tick only while transmitting
+  fsm.io.tick := baud.io.tick
+
+  sreg.io.load := fsm.io.loadReg
+  sreg.io.data := io.data.payload
+  sreg.io.shift := fsm.io.shiftReg
+  fsm.io.shiftRegBit := sreg.io.bit
+
+  // Stream handshake + CTS gating
+  val canStart = !fsm.io.busy && io.cts
+  fsm.io.start := io.data.valid && canStart
+  io.data.ready := canStart // accept the cycle FSM starts
+
+  io.tx := fsm.io.txBit
 }
 
 /** Verilog generation entry point.
