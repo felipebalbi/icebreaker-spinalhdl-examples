@@ -1,21 +1,27 @@
 # UartTx — TODO
 
-A self-contained checklist of everything left to build. Designed so you can
-work through it without needing to ask for the next step. Each item lists
-**what** to do, **why** it matters, the **interface** to aim for, and what
-to **verify** in sim.
+History and status of the UartTx build, plus optional follow-ups.
+Each completed step has a "What landed" summary so you can rediscover
+the design rationale without re-reading the source. Open items live
+under "Stretch goals" at the bottom.
 
-Order is bottom-up: each block is self-testable before the next one needs it.
+Order is bottom-up: each block was self-tested before the next one
+needed it.
 
 ---
 
 ## ✅ Done
-- [x] `UartTxConfig` (clkFreqHz, baudRate, dataBits, stopBits, parity)
+- [x] `UartTxConfig` (clkFreqHz, baudRate, dataBits, stopBits, parity, useCts)
 - [x] `ParityType` SpinalEnum (None/Even/Odd)
 - [x] `BaudGenerator` (DDS) + sim
-- [x] `UartTx` IO bundle stub (Stream in, tx out, cts in)
-- [x] `icebreaker.pcf` pinout (clk, tx, cts, data Stream)
-- [x] `UartTxVerilog` generation entrypoint (UartTx is its own top)
+- [x] `TxShiftReg` + sim
+- [x] `TxFsm` + sim
+- [x] `UartTx` Stream-fed wrapper + sim
+- [x] `UartTxTest` integration top (clock domain, FIFO, message ROM) + sim
+- [x] `icebreaker.pcf` (clk, reset, tx)
+- [x] `UartTxTestVerilog` generation entrypoint
+- [x] **Hardware bring-up: `Hello, World\r\n` running on the iCEbreaker
+      and received cleanly on the desktop's USB-UART.** 🎉
 
 ---
 
@@ -184,31 +190,20 @@ their own buffering aren't forced to pay for a duplicate. See
 
 ---
 
-## 🔲 Step 5b — Hardware bring-up (on the board)
+## ✅ Step 5b — Hardware bring-up (on the board)
 
-The pcf and Verilog generation are already wired up. Just:
+Confirmed working end-to-end on real hardware:
 
-1. `make` → produces `gen/UartTx.bin`.
-2. `make flash` → loads it onto the icebreaker.
-3. **Driving it from outside:** since `data_valid`, `data_ready`, and
-   `data_payload[7:0]` are exposed as physical pins (per current pcf),
-   you'll need *something* to wiggle them. Options:
-   - **Easier:** add a tiny pattern generator inside UartTx (or in a
-     thin wrapper) that emits a fixed byte (`'U' = 0x55` is a great
-     test pattern — alternating bits make scope traces obvious) once
-     per second, ignoring the external `data_*` pins. Gate behind a
-     constructor flag so sim still uses the Stream.
-   - **Harder but more honest:** drive the `data_*` pins from another
-     MCU / FTDI GPIOs and respect the ready/valid handshake.
-4. **Verify on host:** wire icebreaker `tx` → FTDI cable RX, GND → GND.
-   `picocom -b 115200 /dev/ttyUSB1` (Linux) or PuTTY (Windows). You
-   should see your test pattern.
-5. **Scope check (optional but instructive):** probe `tx` and verify
-   bit width = `1 / 115200 ≈ 8.68 µs`, frame structure matches 8N1.
+1. `make` produces `gen/UartTxTest.bin`.
+2. `make flash` loads it onto the iCEbreaker via `iceprog`.
+3. The board broadcasts `"Hello, World\r\n"` continuously at 115 200
+   baud out the FPGA's tx pin (pcf pin 9).
+4. Wired tx → host's USB-UART RX (the iCEbreaker's onboard FT2232
+   already exposes one), `picocom -b 115200 /dev/ttyUSB1` shows the
+   message scrolling cleanly with no corruption.
 
-**Pcf to revisit:** the `cts` and `data_*` pin assignments are marked
-`REVISIT` — check them against the icebreaker pinout and your actual
-wiring before flashing.
+The `useCts = false` path is what's deployed (no flow control on the
+USB-UART).
 
 ---
 
