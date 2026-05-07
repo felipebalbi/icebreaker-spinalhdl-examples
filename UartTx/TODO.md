@@ -156,7 +156,35 @@ io.tx             := fsm.io.txBit
 
 ---
 
-## 🔲 Step 5 — Hardware bring-up
+## ✅ Step 5 — Hardware bring-up wrapper
+
+**File:** `src/hw/UartTxTest.scala` (new top-level wrapper)
+
+**What landed:**
+- Explicit `ClockDomain` (RISING / ASYNC / active-LOW reset) so the
+  iCEbreaker user button (pulled high, grounded when pressed)
+  actually resets the design. Spinal's implicit default would have
+  silently left the reset pin disconnected.
+- `StreamFifo[Bits(dataBits)]` (depth 16 by default) sitting between
+  the message producer and `UartTx`. Provides natural back-pressure;
+  no bytes lost when the line is busy.
+- Tiny LUT-ROM holding the broadcast message (default
+  `"Hello, World\r\n"`) plus a counter that walks it. Counter only
+  advances on `push.fire`, so when the FIFO fills the producer
+  parks until the UART drains.
+- `RegNext(uart.io.tx) init(True)` on the output so the line
+  starts cleanly idle-high regardless of FSM startup transient.
+- Three constructor knobs: `cfg`, `message`, `fifoDepth`.
+
+**Stretch goal "Internal `StreamFifo`" — resolution:**
+Resolved by composition rather than baking it into `UartTx`. The
+FIFO lives in `UartTxTest` (the integration layer) so users with
+their own buffering aren't forced to pay for a duplicate. See
+`UartTxTest.scala` Scaladoc for the full rationale.
+
+---
+
+## 🔲 Step 5b — Hardware bring-up (on the board)
 
 The pcf and Verilog generation are already wired up. Just:
 
@@ -186,7 +214,9 @@ wiring before flashing.
 
 ## 🔲 Stretch goals (optional, in roughly increasing complexity)
 
-- [ ] **Internal `StreamFifo`** so bursty producers don't stall.
+- [x] ~~**Internal `StreamFifo`** so bursty producers don't stall.~~
+      *Resolved by composition* — `UartTxTest` instantiates one
+      externally instead. See Step 5 above.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
       `BaudGeneratorCounter`, parameterise UartTx to pick one,
       compare LUT usage in `nextpnr-ice40` reports vs. DDS.

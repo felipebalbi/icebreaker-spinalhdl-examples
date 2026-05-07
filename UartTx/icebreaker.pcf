@@ -1,25 +1,10 @@
 # 12 MHz clock
-set_io clk           35
-set_frequency clk    12
+set_io io_clk        35
+set_frequency io_clk 12
 
-# reset
-set_io reset         10
+# Active-low reset (iCEbreaker user button: pulled high, shorted to
+# ground when pressed)
+set_io io_reset      10
 
-# tx
-set_io io_tx         11
-
-# REVISIT: find proper pins
-set_io io_cts        9
-
-set_io io_data_valid 12
-set_io io_data_ready 13
-
-set_io io_data_payload[0] 14
-set_io io_data_payload[1] 15
-set_io io_data_payload[2] 16
-set_io io_data_payload[3] 17
-set_io io_data_payload[4] 18
-set_io io_data_payload[5] 19
-set_io io_data_payload[6] 20
-set_io io_data_payload[7] 21
-
+# UART TX — connect to the host's USB-UART RX
+set_io io_tx         9
