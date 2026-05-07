@@ -55,55 +55,46 @@ val io = new Bundle {
 
 ---
 
-## 🔲 Step 3 — `TxFsm`
+## ✅ Step 3 — `TxFsm`
 
 **Goal:** sequence one frame:
 `Idle → Start → Data×N → (Parity) → Stop×M → Idle`.
 
-**File:** `src/hw/TxFsm.scala` (use `spinal.lib.fsm.StateMachine`)
+**File:** `src/hw/TxFsm.scala` (uses `spinal.lib.fsm.StateMachine`)
 
-**Suggested IO:**
-```scala
-val io = new Bundle {
-  val start       = in  Bool()   // pulse to begin a frame (FSM is in Idle)
-  val tick        = in  Bool()   // baud tick (advance one bit boundary)
-  val shiftRegBit = in  Bool()   // current bit from TxShiftReg
-  val busy        = out Bool()   // high while not Idle
-  val loadReg     = out Bool()   // pulse on accepted byte (latch shift reg)
-  val shiftReg    = out Bool()   // pulse on each Data-state tick
-  val txBit       = out Bool()   // what to drive on the line this bit period
-}
-```
-
-**States:**
-- `Idle`: `txBit=1`, `busy=0`. On `start`: pulse `loadReg`, go to `Start`.
-- `Start`: `txBit=0`. After one `tick`, go to `Data`.
-- `Data`: `txBit = shiftRegBit`. Count ticks; after `dataBits` ticks total,
-  go to `Parity` (if enabled) else `Stop`. Pulse `shiftReg` once per tick
-  while in Data — verify the count carefully so all bits get exposed.
-- `Parity` (if `cfg.parity != None`): `txBit = parity bit`. After 1 tick,
-  go to `Stop`.
-- `Stop`: `txBit=1`. After `stopBits` ticks, go to `Idle`.
-
-**Design notes:**
-- **`txBit` should be registered** so `io.tx` is glitch-free.
-- The FSM does **not** own the shift register's bit value; it just emits
-  `shiftReg` pulses and consumes `shiftRegBit` combinationally.
-- Bit counter: `UInt(log2Up(dataBits + 1) bits)`, increments on `tick`,
-  resets on state entry.
-- **Off-by-one is the classic bug here** — verify in sim that exactly
-  `dataBits` bit periods of data appear, not `dataBits-1` or `dataBits+1`.
+**What landed:**
+- States: Idle / Start / Data / Parity / Stop, with a registered
+  `txBit` driven from `whenIsActive` in every state (so every bit
+  boundary has the same 1-cycle pipeline delay → uniform bit
+  periods).
+- Parity fully wired: even/odd parity bit is XOR-accumulated across
+  the data shifts and emitted in `parityState`. `ParityType.None`
+  elides the parity-state transition at elaboration time so the
+  state synthesises away.
+- Configurable stop bits (`cfg.stopBits`) plumbed through via
+  `stopCounter`.
+- `loadReg` pulses exactly once per frame (in `idleState` on
+  `start`); `shiftReg` pulses `dataBits − 1` times during `dataState`.
+- `busy := !isActive(idleState)` — single source of truth.
 
 **Sim (`src/sim/TxFsmSim.scala`):**
-- Drive a fake tick (e.g. every 4 cycles, well below baud).
-- Stub the shift register: a small mutable byte in the testbench that
-  shifts when `shiftReg` pulses, exposing its LSB on `shiftRegBit`.
-- Pulse `start` and watch the `txBit` sequence: should be
-  `0, d0, d1, ..., d7, 1` (and `1`s for stop).
-- Verify `busy` is high from `start` until back in Idle.
-- Verify `loadReg` pulses exactly once at frame start.
-- Verify `shiftReg` pulses the right number of times.
-- Try back-to-back frames (start a second frame the cycle busy drops).
+- Sweeps the full config matrix: 8N1, 8N2, 8E1, 8E2, 8O1, 8O2, plus
+  5E1/5E2/5O1/5O2 for the `dataBits` axis.
+- Per-config: bit-correctness sweep on a handful of patterns
+  (0x00, 0xFF, alternating, walking-1/0, mixed) +
+  back-to-back-frame test + `loadReg`/`shiftReg` pulse-count check.
+- Sim-side fakes for `BaudGenerator` (tick fork) and `TxShiftReg`
+  (load/shift fork). The tick fork required two non-obvious
+  fixes — see the comments in `TxFsmSim.scala`:
+  - `waitSampling(20)` at fork start so the first `busy` poll
+    doesn't fire on uninitialized state before reset settles.
+  - `while (busy) waitSampling()` re-arm before each frame, because
+    `signal.toBoolean` after `waitSampling()` returns the value of
+    the cycle that just *completed* (not the post-edge value), so a
+    naive level-poll catches a stale True the cycle after the FSM
+    leaves the previous frame.
+
+**Makefile:** `sim-fsm` target added; included in the `sim` aggregate.
 
 ---
 
@@ -189,9 +180,6 @@ wiring before flashing.
 
 ## 🔲 Stretch goals (optional, in roughly increasing complexity)
 
-- [ ] **Parity bit support.** Compute `^data` (XOR-reduce) for even,
-      invert for odd, send in the Parity state.
-- [ ] **Configurable stop bits actually plumbed through the FSM.**
 - [ ] **Internal `StreamFifo`** so bursty producers don't stall.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
       `BaudGeneratorCounter`, parameterise UartTx to pick one,
