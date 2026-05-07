@@ -24,6 +24,13 @@ import spinal.core.sim._
   *      high while feeding new payloads each handshake. Confirm each
   *      byte arrives intact with no missing or extra bit periods.
   *
+  *   3b. **Single continuous burst.** Strictly tighter than (3): the
+  *      producer holds `valid` high across N frames and only swaps
+  *      the payload between handshakes — `valid` never falls until
+  *      the last byte is accepted. Catches bugs that would slip past
+  *      (3) such as an FSM requiring `valid` to deassert between
+  *      frames, or stale-payload latching.
+  *
   *   4. **Handshake timing.** `data.ready` is high in idle, drops the
   *      cycle a frame starts, and stays low until the FSM is back in
   *      idle. The byte gets accepted on the same cycle as the FSM
@@ -112,6 +119,29 @@ object UartTxSim {
           do { dut.clockDomain.waitSampling() } while (
             !dut.io.data.ready.toBoolean
           )
+          dut.io.data.valid #= false
+        }
+
+        /** Push N bytes as a single continuous Stream burst: `valid` is
+          * held high the whole time, the payload is swapped on each ready
+          * edge, and `valid` is only dropped after the LAST byte is
+          * accepted. This exercises the "producer never deasserts valid"
+          * contract of Stream and catches bugs that wouldn't show up
+          * with `sendByte` (which drops valid between bytes), e.g. an FSM
+          * that requires valid to fall before launching the next frame,
+          * or stale-payload latching when payload changes the same cycle
+          * the wrapper accepts.
+          */
+        def sendBurst(bytes: Seq[Int]): Unit = {
+          for (b <- bytes) {
+            dut.io.data.payload #= b
+            dut.io.data.valid   #= true
+            do { dut.clockDomain.waitSampling() } while (
+              !dut.io.data.ready.toBoolean
+            )
+            // intentionally NOT dropping valid here — payload simply
+            // changes on the next loop iteration.
+          }
           dut.io.data.valid #= false
         }
 
@@ -266,6 +296,42 @@ object UartTxSim {
         assert(
           recovered.toSeq == backToBackBytes.map(_ & ((1 << cfg.dataBits) - 1)),
           s"[b2b $cfgLabel] sequence mismatch: $recovered"
+        )
+
+        // ---------- (3b) single continuous burst -------------------------
+
+        // Hold valid high across all N bytes (only swap payload between
+        // frames). Strictly tighter than (3) — proves the wrapper accepts
+        // a Stream burst the way Stream's contract intends, with no
+        // valid-falling-edge required between frames.
+        dut.clockDomain.waitSampling(ticksPerBit * 2)
+        val burstRecovered = collection.mutable.ArrayBuffer.empty[Int]
+        val burstProducer = fork {
+          sendBurst(backToBackBytes)
+        }
+        for (b <- backToBackBytes) {
+          assert(
+            waitForStartEdge(timeoutBits = 24),
+            s"[burst $cfgLabel] timed out waiting for start of 0x${b.toHexString}"
+          )
+          val (start, data, parity, stop) = sampleFrame()
+          assert(!start, s"[burst $cfgLabel] start not low for 0x${b.toHexString}")
+          assert(stop,   s"[burst $cfgLabel] stop not high for 0x${b.toHexString}")
+          val rec  = bitsToInt(data)
+          val mask = (1 << cfg.dataBits) - 1
+          assert(
+            rec == (b & mask),
+            s"[burst $cfgLabel] data mismatch: got 0x${rec.toHexString} expected 0x${(b & mask).toHexString}"
+          )
+          parity.foreach { p =>
+            assert(p == expectedParity(b), s"[burst $cfgLabel] parity mismatch")
+          }
+          burstRecovered += rec
+        }
+        burstProducer.join()
+        assert(
+          burstRecovered.toSeq == backToBackBytes.map(_ & ((1 << cfg.dataBits) - 1)),
+          s"[burst $cfgLabel] sequence mismatch: $burstRecovered"
         )
 
         // ---------- (4) handshake timing ---------------------------------
