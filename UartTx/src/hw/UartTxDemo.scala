@@ -45,7 +45,7 @@ import spinal.lib._
   *   fixed string" stimulus (the producer can always re-push later) but useful
   *   when wiring up a real producer that produces in bursts.
   */
-case class UartTxTest(
+case class UartTxDemo(
     cfg: UartTxConfig = UartTxConfig(useCts = false),
     message: String = "Hello, World\r\n",
     fifoDepth: Int = 16
@@ -54,7 +54,7 @@ case class UartTxTest(
   require(cfg.dataBits >= 7, "ASCII needs at least 7 data bits")
   require(
     !cfg.useCts,
-    "UartTxTest does not expose a CTS pin; use cfg.useCts = false"
+    "UartTxDemo does not expose a CTS pin; use cfg.useCts = false"
   )
 
   val io = new Bundle {
@@ -164,13 +164,13 @@ case class UartTxTest(
 
 /** Verilog generation entry point for the bring-up wrapper.
   *
-  * Run via `make` — the Makefile's TOP variable is set to `UartTxTest`, so this
-  * is what `gen/UartTxTest.v` is built from.
+  * Run via `make` — the Makefile's TOP variable is set to `UartTxDemo`, so this
+  * is what `gen/UartTxDemo.v` is built from.
   */
-object UartTxTestVerilog {
+object UartTxDemoVerilog {
   def main(args: Array[String]): Unit = {
     SpinalConfig(
       targetDirectory = "gen"
-    ).generateVerilog(UartTxTest())
+    ).generateVerilog(UartTxDemo())
   }
 }

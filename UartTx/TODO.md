@@ -17,9 +17,9 @@ needed it.
 - [x] `TxShiftReg` + sim
 - [x] `TxFsm` + sim
 - [x] `UartTx` Stream-fed wrapper + sim
-- [x] `UartTxTest` integration top (clock domain, FIFO, message ROM) + sim
+- [x] `UartTxDemo` integration top (clock domain, FIFO, message ROM) + sim
 - [x] `icebreaker.pcf` (clk, reset, tx)
-- [x] `UartTxTestVerilog` generation entrypoint
+- [x] `UartTxDemoVerilog` generation entrypoint
 - [x] **Hardware bring-up: `Hello, World\r\n` running on the iCEbreaker
       and received cleanly on the desktop's USB-UART.** 🎉
 
@@ -164,7 +164,7 @@ io.tx             := fsm.io.txBit
 
 ## ✅ Step 5 — Hardware bring-up wrapper
 
-**File:** `src/hw/UartTxTest.scala` (new top-level wrapper)
+**File:** `src/hw/UartTxDemo.scala` (new top-level wrapper)
 
 **What landed:**
 - Explicit `ClockDomain` (RISING / ASYNC / active-LOW reset) so the
@@ -184,9 +184,9 @@ io.tx             := fsm.io.txBit
 
 **Stretch goal "Internal `StreamFifo`" — resolution:**
 Resolved by composition rather than baking it into `UartTx`. The
-FIFO lives in `UartTxTest` (the integration layer) so users with
+FIFO lives in `UartTxDemo` (the integration layer) so users with
 their own buffering aren't forced to pay for a duplicate. See
-`UartTxTest.scala` Scaladoc for the full rationale.
+`UartTxDemo.scala` Scaladoc for the full rationale.
 
 ---
 
@@ -194,7 +194,7 @@ their own buffering aren't forced to pay for a duplicate. See
 
 Confirmed working end-to-end on real hardware:
 
-1. `make` produces `gen/UartTxTest.bin`.
+1. `make` produces `gen/UartTxDemo.bin`.
 2. `make flash` loads it onto the iCEbreaker via `iceprog`.
 3. The board broadcasts `"Hello, World\r\n"` continuously at 115 200
    baud out the FPGA's tx pin (pcf pin 9).
@@ -210,7 +210,7 @@ USB-UART).
 ## 🔲 Stretch goals (optional, in roughly increasing complexity)
 
 - [x] ~~**Internal `StreamFifo`** so bursty producers don't stall.~~
-      *Resolved by composition* — `UartTxTest` instantiates one
+      *Resolved by composition* — `UartTxDemo` instantiates one
       externally instead. See Step 5 above.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
       `BaudGeneratorCounter`, parameterise UartTx to pick one,
