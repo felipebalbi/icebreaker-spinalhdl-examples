@@ -133,15 +133,44 @@ object TxFsmSim {
         // ------------------------------------------------------------------
         fork {
           dut.io.tick #= false
+          // Let reset settle BEFORE the first busy poll. At sim time
+          // 0 the busy register is uninitialized and `toBoolean` may
+          // return True; without this wait, the loop below would
+          // start a phantom burst aligned to nothing real and steal
+          // ticks from the first frame. Match the main thread's
+          // init wait.
+          dut.clockDomain.waitSampling(20)
+
+          // Pulse `1 + dataBits + parityBits + stopBits` ticks per
+          // frame. We compute it up front rather than relying on
+          // busy-level polling, because `signal.toBoolean` after
+          // `waitSampling()` returns the value of the cycle that just
+          // *completed* (pre-next-edge), so a level-based `while
+          // (busy)` poll catches a stale "True" the cycle after the
+          // FSM has already returned to idle. Same reason the
+          // initial poll at sim time 0 used to fire immediately
+          // (busy register uninitialized before reset settles).
+          val parityBitsTick = if (cfg.parity == ParityType.None) 0 else 1
+          val ticksPerFrame  = 1 + cfg.dataBits + parityBitsTick + cfg.stopBits
           while (true) {
-            // Wait for a frame to start.
+            // Re-arm: wait until we *actually observe* busy=False
+            // before looking for the next rising edge. This drains
+            // any stale True we'd otherwise read in the cycle after
+            // the FSM left the previous frame (or before reset
+            // propagated, on the very first iteration).
+            while (dut.io.busy.toBoolean) dut.clockDomain.waitSampling()
+            // Now wait for the next frame to start.
             while (!dut.io.busy.toBoolean) dut.clockDomain.waitSampling()
 
-            // First tick lands ticksPerBit cycles after busy rose.
-            for (_ <- 0 until ticksPerBit - 1) dut.clockDomain.waitSampling()
-            dut.io.tick #= true
-            dut.clockDomain.waitSampling()
-            dut.io.tick #= false
+            // Pulse exactly `ticksPerFrame` ticks at ticksPerBit
+            // spacing. First tick lands ticksPerBit cycles after
+            // busy rose.
+            for (_ <- 0 until ticksPerFrame) {
+              for (_ <- 0 until ticksPerBit - 1) dut.clockDomain.waitSampling()
+              dut.io.tick #= true
+              dut.clockDomain.waitSampling()
+              dut.io.tick #= false
+            }
           }
         }
 
