@@ -1,10 +1,10 @@
-PACKAGE := pwm
-TOP     := PwmTop
+PACKAGE  := pwm
+TOP      := PwmTop
 SIM_MAIN := PwmSim
-SRC_DIR := src
-GEN_DIR := gen
-SIM_DIR := simWorkspace
-PCF     := icebreaker.pcf
+SRC_DIR  := src
+GEN_DIR  := gen
+SIM_DIR  := simWorkspace
+PCF      := icebreaker.pcf
 
 # Tools
 SBT     := sbt
@@ -12,54 +12,76 @@ YOSYS   := yosys
 NEXTPNR := nextpnr-ice40
 ICEPACK := icepack
 ICEPROG := iceprog
+GTKWAVE := gtkwave
 
 # Derived files
-V       := $(GEN_DIR)/$(TOP).v
-JSON    := $(GEN_DIR)/$(TOP).json
-ASC     := $(GEN_DIR)/$(TOP).asc
-BIN     := $(GEN_DIR)/$(TOP).bin
+V    := $(GEN_DIR)/$(TOP).v
+JSON := $(GEN_DIR)/$(TOP).json
+ASC  := $(GEN_DIR)/$(TOP).asc
+BIN  := $(GEN_DIR)/$(TOP).bin
 
-# Find all scala sources
-SCALA_SRCS := $(shell find $(SRC_DIR) -name '*.scala')
+# Hardware sources only -- sim sources don't affect Verilog generation,
+# so excluding them prevents needless rebuilds when iterating on tests.
+HW_SRCS := $(shell find $(SRC_DIR)/hw -name '*.scala')
 
-# Default target
-all: $(BIN)
+.DEFAULT_GOAL := all
 
-# Ensure output directory exists
+all: $(BIN) ## Build flashable bitstream (gen/<TOP>.bin)
+
+verilog: $(V) ## Regenerate Verilog only
+
 $(GEN_DIR):
 	mkdir -p $(GEN_DIR)
 
-# 1. Generate Verilog (Spinal → Verilog)
-$(V): $(SCALA_SRCS)
+# 1. Generate Verilog (Spinal -> Verilog)
+$(V): $(HW_SRCS) | $(GEN_DIR)
 	$(SBT) -batch "runMain $(PACKAGE).$(TOP)Verilog"
 
-# 2. Synthesize (Verilog → JSON)
+# 2. Synthesize (Verilog -> JSON)
 $(JSON): $(V)
 	$(YOSYS) -p "synth_ice40 -top $(TOP) -json $@" $<
 
-# 3. Place & route (JSON → ASC)
+# 3. Place & route (JSON -> ASC)
 $(ASC): $(JSON) $(PCF)
 	$(NEXTPNR) \
-		--up5k \
+		--up5k          \
 		--package sg48  \
 		--pcf $(PCF)    \
-		--json $<       \
-		--asc $@        \
-		--freq 12       \
+		--json $< \
+		--asc $@  \
+		--freq 12
 
-# 4. Pack (ASC → BIN)
+# 4. Pack (ASC -> BIN)
 $(BIN): $(ASC)
 	$(ICEPACK) $< $@
 
-sim:
+sim: sim-top ## Run all simulations
+
+sim-top: ## Run PwmTop (top-level) simulation
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 
-# Flash
-flash: $(BIN)
+waves: ## Open the most recent simulation VCD in gtkwave
+	@vcd=$$(find $(SIM_DIR) -name '*.vcd' -printf '%T@ %p\n' 2>/dev/null \
+		| sort -nr | head -1 | cut -d' ' -f2-); \
+	if [ -z "$$vcd" ]; then \
+		echo "no .vcd found under $(SIM_DIR)/ -- run a sim first"; \
+		exit 1; \
+	fi; \
+	echo "opening $$vcd"; \
+	$(GTKWAVE) "$$vcd" &
+
+flash: $(BIN) ## Flash bitstream to the iCEbreaker
 	$(ICEPROG) $<
 
-# Clean
-clean:
+clean: ## Remove generated artefacts (gen/, simWorkspace/)
 	rm -rf $(GEN_DIR) $(SIM_DIR)
 
-.PHONY: all flash clean
+distclean: clean ## clean + nuke sbt build state (target/, project/target/)
+	rm -rf target project/target project/project
+
+help: ## Show this help (every target with a ## description)
+	@awk 'BEGIN { FS = ":.*## "; printf "Available targets:\n\n" } \
+		/^[a-zA-Z0-9_.-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' \
+		$(MAKEFILE_LIST)
+
+.PHONY: all verilog sim sim-top waves flash clean distclean help

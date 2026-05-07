@@ -29,8 +29,9 @@ In rough order of complexity (later ones build on patterns introduced earlier):
   IO `Bundle`; two debouncer styles (integrator vs timer).
 
 **Pwm**
-: Counter-comparator PWM driving an LED. Teaches the PWM idiom;
-  `SpinalSim` testbench (`forkStimulus`, `sleep`, waveform dump).
+: Counter-comparator PWM driving an LED, duty cycle set from external
+  PMOD pins. Teaches the PWM idiom; `SpinalSim` testbench
+  (`forkStimulus`, `sleep`, exact-duty assertions, waveform dump).
 
 **PwmFade**
 : "Breathing" LED with a pluggable duty modulator (linear / sine /
@@ -88,19 +89,41 @@ make flash     # program the iCEBreaker (board must be plugged in)
 make clean
 ```
 
-`PwmFade` also has `make help` listing per-sim targets — worth a peek for the
-conventions I'm settling on going forward.
+Every project has `make help` listing per-sim and per-stage targets, plus a
+`make waves` shortcut that opens the most recent VCD in GTKWave.
 
 ## Conventions
 
-- **Package** matches the project name (`blinky`, `button`,
-  `pwm`, `pwm_fade`, ...). Scala doesn't require this, but it keeps
-  generated Verilog module prefixes predictable.
-- **Generated Verilog** lives in `gen/` (or `rtl/` for Blinky); it is
-  `.gitignore`d.
+Every project follows the same shape:
+
+```
+<Project>/
+  README.md          per-project overview (block diagram, knobs, pins, ...)
+  Makefile           Spinal -> Verilog -> bitstream + sim targets + help
+  build.sbt
+  icebreaker.pcf     iCE40 pin constraints
+  src/
+    hw/              synthesizable code (becomes Verilog/bitstream)
+    sim/             SpinalSim testbenches (never see silicon)
+```
+
+- **Package** matches the project directory in lower-snake-case
+  (`blinky`, `button`, `button_debouncer`, `pwm`, `pwm_fade`, `uart`).
+  Scala doesn't require package = directory; this is a convention to
+  keep generated Verilog module prefixes predictable.
+- **Generated Verilog** lives in `gen/`; it is `.gitignore`d.
 - **Simulation workspaces** (waves, compiled C++) live in
   `simWorkspace/`; also ignored.
-- **Reset**: `BOOT` for everything (iCE40 has no global async reset).
+- **Makefiles** have a self-documenting `help` target — every public
+  target carries a `## description` comment that `make help` parses.
+  Common targets across all projects: `all`, `verilog`, `sim`,
+  `sim-<block>`, `waves`, `flash`, `clean`, `distclean`, `help`.
+- **Sim deps:** Verilog regeneration depends only on `src/hw/`, so
+  editing a testbench under `src/sim/` does NOT trigger a full
+  resynthesis.
+- **Reset**: `BOOT` by default (iCE40 has no global async-reset pin).
+  A few examples (`Blinky`'s reset variant, `Uart`) wire an explicit
+  reset for teaching purposes.
 - **Clock**: 12 MHz from pin 35 unless noted otherwise.
 
 ## Why SpinalHDL?

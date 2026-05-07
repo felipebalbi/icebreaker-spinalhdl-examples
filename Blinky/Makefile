@@ -1,43 +1,92 @@
-TOP     = Blinky
-RTL_DIR = rtl
-PCF     = icebreaker.pcf
+PACKAGE  := blinky
+TOP      := Blinky
+SIM_MAIN := BlinkySim
+SRC_DIR  := src
+GEN_DIR  := gen
+SIM_DIR  := simWorkspace
+# PCF is selected from TOP: the reset variant uses an extra pin (button -> reset),
+# so it gets its own pcf. Override on the command line if you want something else.
+PCF      ?= $(if $(filter BlinkyWithReset,$(TOP)),icebreaker-reset.pcf,icebreaker.pcf)
 
 # Tools
-SBT     = sbt
-YOSYS   = yosys
-NEXTPNR = nextpnr-ice40
-ICEPACK = icepack
-ICEPROG = iceprog
+SBT     := sbt
+YOSYS   := yosys
+NEXTPNR := nextpnr-ice40
+ICEPACK := icepack
+ICEPROG := iceprog
+GTKWAVE := gtkwave
 
-all: $(TOP).bin
+# Derived files
+V    := $(GEN_DIR)/$(TOP).v
+JSON := $(GEN_DIR)/$(TOP).json
+ASC  := $(GEN_DIR)/$(TOP).asc
+BIN  := $(GEN_DIR)/$(TOP).bin
 
-# 1. Generate Verilog into rtl/
-$(RTL_DIR)/$(TOP).v:
-	$(SBT) -batch "runMain $(TOP)Verilog"
+# Hardware sources only -- sim sources don't affect Verilog generation,
+# so excluding them prevents needless rebuilds when iterating on tests.
+HW_SRCS := $(shell find $(SRC_DIR)/hw -name '*.scala')
 
-# 2. Synthesize to JSON
-$(TOP).json: $(RTL_DIR)/$(TOP).v
+.DEFAULT_GOAL := all
+
+all: $(BIN) ## Build flashable bitstream (gen/<TOP>.bin)
+
+verilog: $(V) ## Regenerate Verilog only
+
+$(GEN_DIR):
+	mkdir -p $(GEN_DIR)
+
+# 1. Generate Verilog (Spinal -> Verilog)
+$(V): $(HW_SRCS) | $(GEN_DIR)
+	$(SBT) -batch "runMain $(PACKAGE).$(TOP)Verilog"
+
+# 2. Synthesize (Verilog -> JSON)
+$(JSON): $(V)
 	$(YOSYS) -p "synth_ice40 -top $(TOP) -json $@" $<
 
-# 3. Place & route
-$(TOP).asc: $(TOP).json $(PCF)
+# 3. Place & route (JSON -> ASC)
+$(ASC): $(JSON) $(PCF)
 	$(NEXTPNR) \
-		--up5k \
-		--package sg48 \
-		--pcf $(PCF) \
+		--up5k          \
+		--package sg48  \
+		--pcf $(PCF)    \
 		--json $< \
-		--asc $@
+		--asc $@  \
+		--freq 12
 
-# 4. Pack bitstream
-$(TOP).bin: $(TOP).asc
+# 4. Pack (ASC -> BIN)
+$(BIN): $(ASC)
 	$(ICEPACK) $< $@
 
-# Flash to board
-flash: $(TOP).bin
+sim: sim-blinky sim-reset ## Run all simulations
+
+sim-blinky: ## Run Blinky (default top) simulation
+	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
+
+sim-reset: ## Run BlinkyWithReset simulation
+	$(SBT) -batch "runMain $(PACKAGE).BlinkyWithResetSim"
+
+waves: ## Open the most recent simulation VCD in gtkwave
+	@vcd=$$(find $(SIM_DIR) -name '*.vcd' -printf '%T@ %p\n' 2>/dev/null \
+		| sort -nr | head -1 | cut -d' ' -f2-); \
+	if [ -z "$$vcd" ]; then \
+		echo "no .vcd found under $(SIM_DIR)/ -- run a sim first"; \
+		exit 1; \
+	fi; \
+	echo "opening $$vcd"; \
+	$(GTKWAVE) "$$vcd" &
+
+flash: $(BIN) ## Flash bitstream to the iCEbreaker
 	$(ICEPROG) $<
 
-# Cleanup
-clean:
-	rm -f $(RTL_DIR)/*.v *.json *.asc *.bin
+clean: ## Remove generated artefacts (gen/, simWorkspace/)
+	rm -rf $(GEN_DIR) $(SIM_DIR)
 
-.PHONY: all flash clean
+distclean: clean ## clean + nuke sbt build state (target/, project/target/)
+	rm -rf target project/target project/project
+
+help: ## Show this help (every target with a ## description)
+	@awk 'BEGIN { FS = ":.*## "; printf "Available targets:\n\n" } \
+		/^[a-zA-Z0-9_.-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' \
+		$(MAKEFILE_LIST)
+
+.PHONY: all verilog sim sim-blinky sim-reset waves flash clean distclean help

@@ -12,16 +12,13 @@ val spinalIdslPlugin = compilerPlugin(
 
 lazy val projectname = (project in file("."))
   .settings(
-    name := "button",
-
+    name := "button_debouncer",
     Compile / scalaSource := baseDirectory.value / "src",
-
     libraryDependencies ++= Seq(
-      "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion,
-      "com.github.spinalhdl" %% "spinalhdl-lib" % spinalVersion,
-      compilerPlugin(
-        "com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion
-      )
+      spinalCore,
+      spinalLib,
+      spinalIdslPlugin,
+      "com.github.spinalhdl" %% "spinalhdl-sim" % spinalVersion
     )
   )
 
