@@ -7,12 +7,11 @@ import spinal.lib.fsm._
 /** UART transmit frame sequencer (the "control" half of the TX path).
   *
   * Sequences the line through
-  * `Idle → Start → Data×N → [Parity] → Stop×M → Idle`, one bit
-  * boundary per [[BaudGenerator]] tick. Knows nothing about how the
-  * tick is generated, nothing about how the byte is stored
-  * ([[TxShiftReg]]), and nothing about the byte-stream handshake — all
-  * three concerns live in [[UartTx]] which wires this FSM, the baud
-  * generator, and the shift register together.
+  * `Idle → Start → Data×N → [Parity] → Stop×M → Idle`, one bit boundary per
+  * [[BaudGenerator]] tick. Knows nothing about how the tick is generated,
+  * nothing about how the byte is stored ([[TxShiftReg]]), and nothing about the
+  * byte-stream handshake — all three concerns live in [[UartTx]] which wires
+  * this FSM, the baud generator, and the shift register together.
   *
   * Frame on the wire (8N1 by default; parity slot present only when
   * `cfg.parity != ParityType.None`):
@@ -25,159 +24,148 @@ import spinal.lib.fsm._
   *   idle   : line returns high
   * }}}
   *
-  * == Parity ==
+  * ==Parity==
   *
   * Implemented as an FSM-local accumulator. On entry to `dataState`,
-  * `parityBit` is seeded to `False` for Even or `True` for Odd. On
-  * each Data tick (including the final one), the current data bit is
-  * XOR'd into `parityBit`. By the time the FSM hands over to
-  * `parityState`, `parityBit` holds the bit to transmit:
-  * `xor(data)` for Even, `~xor(data)` for Odd. For
-  * `ParityType.None` the seed and accumulate are elided at
-  * elaboration time and `parityState` is unreachable.
+  * `parityBit` is seeded to `False` for Even or `True` for Odd. On each Data
+  * tick (including the final one), the current data bit is XOR'd into
+  * `parityBit`. By the time the FSM hands over to `parityState`, `parityBit`
+  * holds the bit to transmit: `xor(data)` for Even, `~xor(data)` for Odd. For
+  * `ParityType.None` the seed and accumulate are elided at elaboration time and
+  * `parityState` is unreachable.
   *
-  * == Timing contract with the rest of UartTx ==
+  * ==Timing contract with the rest of UartTx==
   *
   * The [[BaudGenerator]] must be quiescent (no ticks) while we are in
-  * `idleState`. The standard wiring `baud.io.enable := fsm.io.busy`
-  * guarantees this. The reason is the start bit: with the baud generator
-  * disabled in Idle, its phase accumulator sits at zero. Once `busy`
-  * rises (the cycle the FSM enters `startState`), the accumulator starts
-  * climbing and the *first* tick lands almost exactly one bit period
-  * later — so the start bit is one full bit period wide. If you ever
-  * pre-enable the baud generator, the start bit can be anywhere from
-  * 1 to ticksPerBit clocks wide depending on accumulator phase. Don't.
+  * `idleState`. The standard wiring `baud.io.enable := fsm.io.busy` guarantees
+  * this. The reason is the start bit: with the baud generator disabled in Idle,
+  * its phase accumulator sits at zero. Once `busy` rises (the cycle the FSM
+  * enters `startState`), the accumulator starts climbing and the *first* tick
+  * lands almost exactly one bit period later — so the start bit is one full bit
+  * period wide. If you ever pre-enable the baud generator, the start bit can be
+  * anywhere from 1 to ticksPerBit clocks wide depending on accumulator phase.
+  * Don't.
   *
-  * == The classic off-by-one ==
+  * ==The classic off-by-one==
   *
-  * The bit-counting boundary is the easiest place in any UART TX to be
-  * off by one. We count *ticks within Data* rather than *bits
-  * transmitted*:
+  * The bit-counting boundary is the easiest place in any UART TX to be off by
+  * one. We count *ticks within Data* rather than *bits transmitted*:
   *
-  *   - On entry to Data, the LSB is exposed on `shiftRegBit` (the
-  *     wrapper pulsed `loadReg` two states ago, latching the byte
-  *     into [[TxShiftReg]]).
-  *   - That bit lives on the wire from the cycle after Data entry
-  *     until the first tick. On each tick we pulse `shiftReg` to
-  *     expose the next bit and bump `bitCounter`.
-  *   - On the tick where `bitCounter === dataBits - 1` (i.e. we've
-  *     already exposed `dataBits - 1` bits and are sitting on the
-  *     last one), we transition to Stop *without* shifting again —
-  *     the shift register won't be sampled until the next `loadReg`
-  *     anyway, so suppressing the dangling shift just keeps waveforms
-  *     tidy.
+  *   - On entry to Data, the LSB is exposed on `shiftRegBit` (the wrapper
+  *     pulsed `loadReg` two states ago, latching the byte into [[TxShiftReg]]).
+  *   - That bit lives on the wire from the cycle after Data entry until the
+  *     first tick. On each tick we pulse `shiftReg` to expose the next bit and
+  *     bump `bitCounter`.
+  *   - On the tick where `bitCounter === dataBits - 1` (i.e. we've already
+  *     exposed `dataBits - 1` bits and are sitting on the last one), we
+  *     transition to Stop *without* shifting again — the shift register won't
+  *     be sampled until the next `loadReg` anyway, so suppressing the dangling
+  *     shift just keeps waveforms tidy.
   *
-  * Net effect: exactly `dataBits` bit periods elapse in Data — one per
-  * data bit. [[TxFsmSim]] verifies this by sampling at the middle of
-  * each bit period (which is also how a real UART RX recovers data).
+  * Net effect: exactly `dataBits` bit periods elapse in Data — one per data
+  * bit. [[TxFsmSim]] verifies this by sampling at the middle of each bit period
+  * (which is also how a real UART RX recovers data).
   *
-  * == Why `txBit` is registered, and why every state drives it from
-  * `whenIsActive` (not `onEntry`) ==
+  * ==Why `txBit` is registered, and why every state drives it from
+ `whenIsActive` (not `onEntry`)==
   *
-  * `txBit` is driven from a register (`txReg`), not a combinational mux
-  * over state and `shiftRegBit`. Either would be functionally correct,
-  * but the register makes the output wave clean (one transition per bit
-  * boundary, no glitches across state-change combinational paths) and
-  * keeps timing slack on this output trivially easy.
+  * `txBit` is driven from a register (`txReg`), not a combinational mux over
+  * state and `shiftRegBit`. Either would be functionally correct, but the
+  * register makes the output wave clean (one transition per bit boundary, no
+  * glitches across state-change combinational paths) and keeps timing slack on
+  * this output trivially easy.
   *
-  * The non-obvious choice is *where* in each state to drive `txReg`. An
-  * earlier revision used `onEntry` blocks for Start and Stop and
-  * `whenIsActive` for Data:
+  * The non-obvious choice is *where* in each state to drive `txReg`. An earlier
+  * revision used `onEntry` blocks for Start and Stop and `whenIsActive` for
+  * Data:
   *
-  *   - SpinalHDL `onEntry` assignments commit at the *same* clock edge
-  *     as the state transition itself.
-  *   - `whenIsActive` assignments commit one edge later (they only run
-  *     once the state register has updated).
+  *   - SpinalHDL `onEntry` assignments commit at the *same* clock edge as the
+  *     state transition itself.
+  *   - `whenIsActive` assignments commit one edge later (they only run once the
+  *     state register has updated).
   *
-  * Mixing those gives uneven bit periods. Specifically, the Stop
-  * `onEntry`'s `txReg := True` commits at the same edge as
-  * `goto(stopState)`, beating Data's `whenIsActive` `txReg := bit7`
-  * — so the last data bit ends up only `ticksPerBit - 1` cycles wide,
-  * while the start bit (set by `onEntry`, also "instant") is
-  * `ticksPerBit + 1` cycles wide. Frame width sums to the correct value,
-  * but the bit boundaries are skewed by one cycle (~10% per-bit timing
-  * error at ticksPerBit=10; ~1% at the realistic 12 MHz / 115200 ratio
-  * — within the ~3% tolerance of any sane UART RX, but still wrong).
+  * Mixing those gives uneven bit periods. Specifically, the Stop `onEntry`'s
+  * `txReg := True` commits at the same edge as `goto(stopState)`, beating
+  * Data's `whenIsActive` `txReg := bit7` — so the last data bit ends up only
+  * `ticksPerBit - 1` cycles wide, while the start bit (set by `onEntry`, also
+  * "instant") is `ticksPerBit + 1` cycles wide. Frame width sums to the correct
+  * value, but the bit boundaries are skewed by one cycle (~10% per-bit timing
+  * error at ticksPerBit=10; ~1% at the realistic 12 MHz / 115200 ratio — within
+  * the ~3% tolerance of any sane UART RX, but still wrong).
   *
-  * The fix used here: every state drives `txReg` from its
-  * `whenIsActive` block. That gives every state the same 1-cycle
-  * pipeline delay between "FSM enters this state" and "the line
-  * reflects this state's bit value". All bit periods come out exactly
-  * `ticksPerBit` cycles wide.
+  * The fix used here: every state drives `txReg` from its `whenIsActive` block.
+  * That gives every state the same 1-cycle pipeline delay between "FSM enters
+  * this state" and "the line reflects this state's bit value". All bit periods
+  * come out exactly `ticksPerBit` cycles wide.
   *
-  * == Sub-blocks called out in TODO.md ==
+  * ==Sub-blocks called out in TODO.md==
   *
   *   - Parity: implemented (Even / Odd / None, see "Parity" above).
   *   - `cfg.stopBits` is honoured (1 or 2), enforced by `UartTxConfig`.
-  *   - The wrapper-level Stream/CTS handshake is `UartTx`'s problem,
-  *     not ours.
+  *   - The wrapper-level Stream/CTS handshake is `UartTx`'s problem, not ours.
   */
 case class TxFsm(cfg: UartTxConfig) extends Component {
   val io = new Bundle {
 
-    /** Begin-frame request, **level**-sensitive. Sampled on every cycle
-      * while the FSM is in Idle. The wrapper is responsible for
-      * dropping it once the frame is accepted (typically by ANDing it
-      * with `!busy`), so the FSM consumes it for exactly one cycle and
-      * then transitions out. Holding it high across multiple frames is
-      * also fine — Idle is re-entered with `start` already high, and
-      * the next frame begins immediately on the next cycle.
+    /** Begin-frame request, **level**-sensitive. Sampled on every cycle while
+      * the FSM is in Idle. The wrapper is responsible for dropping it once the
+      * frame is accepted (typically by ANDing it with `!busy`), so the FSM
+      * consumes it for exactly one cycle and then transitions out. Holding it
+      * high across multiple frames is also fine — Idle is re-entered with
+      * `start` already high, and the next frame begins immediately on the next
+      * cycle.
       *
-      * (An earlier revision used `io.start.rise()` here. That worked
-      * only because the wrapper's `!busy` gate guaranteed `start` was
-      * low whenever Idle was re-entered. A unit test that drives
-      * `start` directly without the gate — e.g. a level-held signal —
-      * would deadlock after the first frame because `rise` would
-      * never see a low→high transition again. Level-sensitive is
-      * strictly more general and equivalent for the wrapper's usage.)
+      * (An earlier revision used `io.start.rise()` here. That worked only
+      * because the wrapper's `!busy` gate guaranteed `start` was low whenever
+      * Idle was re-entered. A unit test that drives `start` directly without
+      * the gate — e.g. a level-held signal — would deadlock after the first
+      * frame because `rise` would never see a low→high transition again.
+      * Level-sensitive is strictly more general and equivalent for the
+      * wrapper's usage.)
       */
     val start = in Bool ()
 
     /** One-cycle pulse from the [[BaudGenerator]] marking a bit-period
-      * boundary. The FSM advances on every tick: Start → Data, each
-      * Data bit, each Stop bit, Stop → Idle.
+      * boundary. The FSM advances on every tick: Start → Data, each Data bit,
+      * each Stop bit, Stop → Idle.
       */
     val tick = in Bool ()
 
-    /** Combinational bit 0 of the [[TxShiftReg]] — i.e. the bit that
-      * should currently be on the wire while we are in Data. Stable
-      * between `shiftReg` pulses by contract of the shift register
-      * block.
+    /** Combinational bit 0 of the [[TxShiftReg]] — i.e. the bit that should
+      * currently be on the wire while we are in Data. Stable between `shiftReg`
+      * pulses by contract of the shift register block.
       */
     val shiftRegBit = in Bool ()
 
-    /** High whenever the FSM is **not** in Idle. The wrapper ties this
-      * to the BaudGenerator's `enable` (so ticks happen only during a
-      * frame — see the timing contract above) and to the *inverse* of
-      * the input Stream's `ready` (so the producer is back-pressured
-      * for the duration of a frame).
+    /** High whenever the FSM is **not** in Idle. The wrapper ties this to the
+      * BaudGenerator's `enable` (so ticks happen only during a frame — see the
+      * timing contract above) and to the *inverse* of the input Stream's
+      * `ready` (so the producer is back-pressured for the duration of a frame).
       *
       * Computed combinationally from the FSM's state register
-      * (`!isActive(idleState)`) rather than maintained as a per-state
-      * default. That makes the invariant explicit and immune to "I
-      * added a new state and forgot to set `busy`" bugs.
+      * (`!isActive(idleState)`) rather than maintained as a per-state default.
+      * That makes the invariant explicit and immune to "I added a new state and
+      * forgot to set `busy`" bugs.
       */
     val busy = out Bool ()
 
     /** One-cycle pulse the cycle the FSM accepts a frame. Wraps to
-      * [[TxShiftReg]]'s `load` so the byte on the data Stream is
-      * latched into the shift register the same cycle the Stream
-      * handshake completes.
+      * [[TxShiftReg]]'s `load` so the byte on the data Stream is latched into
+      * the shift register the same cycle the Stream handshake completes.
       */
     val loadReg = out Bool ()
 
-    /** One-cycle pulse on each Data-state tick *except* the last,
-      * advancing the shift register so the next bit is exposed on
-      * `shiftRegBit` for the following bit period. Deliberately not
-      * pulsed on the final data tick — the shift register is not
-      * sampled again until the next `loadReg`, so an extra shift
-      * would be harmless, but suppressing it keeps the waveform tidy
-      * and the intent obvious.
+    /** One-cycle pulse on each Data-state tick *except* the last, advancing the
+      * shift register so the next bit is exposed on `shiftRegBit` for the
+      * following bit period. Deliberately not pulsed on the final data tick —
+      * the shift register is not sampled again until the next `loadReg`, so an
+      * extra shift would be harmless, but suppressing it keeps the waveform
+      * tidy and the intent obvious.
       */
     val shiftReg = out Bool ()
 
-    /** Registered serial bit going to the wire. High in Idle and Stop,
-      * low in Start, the current `shiftRegBit` in Data.
+    /** Registered serial bit going to the wire. High in Idle and Stop, low in
+      * Start, the current `shiftRegBit` in Data.
       */
     val txBit = out Bool ()
   }
@@ -224,7 +212,7 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
   // state register below.
   // --------------------------------------------------------------------------
 
-  io.loadReg  := False
+  io.loadReg := False
   io.shiftReg := False
 
   // --------------------------------------------------------------------------
@@ -314,7 +302,7 @@ case class TxFsm(cfg: UartTxConfig) extends Component {
             }
           } otherwise {
             io.shiftReg := True
-            bitCounter  := bitCounter + 1
+            bitCounter := bitCounter + 1
           }
         }
       }

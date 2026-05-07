@@ -6,31 +6,29 @@ import spinal.core.sim._
 /** Standalone sim for [[TxShiftReg]].
   *
   * What we verify
-  *   1. After loading a byte, the bit sequence on `io.bit` over the
-  *      next 8 shift cycles matches the byte's LSB-first bit order.
+  *   1. After loading a byte, the bit sequence on `io.bit` over the next 8
+  *      shift cycles matches the byte's LSB-first bit order.
   *   2. Multiple test patterns: all-zeros, all-ones, alternating bits,
-  *      single-bit walks, and a generic mixed pattern. Each catches a
-  *      different class of bug:
-  *        - `0x00` / `0xFF`: catches "init value bleeds through" bugs
-  *          (e.g. forgetting to actually load).
-  *        - `0xAA` / `0x55`: catches off-by-one shift bugs.
-  *        - `0x80` / `0x01`: catches LSB/MSB swap bugs that symmetric
-  *          patterns (`0xAA`) would mask.
-  *        - `0xAD`: a generic mix, no special structure.
-  *   3. Load-priority test: when `load=1` and `shift=1` fire on the
-  *      same cycle, the freshly loaded LSB must appear next cycle —
-  *      not the shifted-then-loaded value, not the loaded-then-shifted
-  *      value, just the load.
-  *   4. Hold test: with both `load` and `shift` low, the register
-  *      content (and `io.bit`) must not change.
+  *      single-bit walks, and a generic mixed pattern. Each catches a different
+  *      class of bug:
+  *      - `0x00` / `0xFF`: catches "init value bleeds through" bugs (e.g.
+  *        forgetting to actually load).
+  *      - `0xAA` / `0x55`: catches off-by-one shift bugs.
+  *      - `0x80` / `0x01`: catches LSB/MSB swap bugs that symmetric patterns
+  *        (`0xAA`) would mask.
+  *      - `0xAD`: a generic mix, no special structure.
+  *   3. Load-priority test: when `load=1` and `shift=1` fire on the same cycle,
+  *      the freshly loaded LSB must appear next cycle — not the
+  *      shifted-then-loaded value, not the loaded-then-shifted value, just the
+  *      load.
+  *   4. Hold test: with both `load` and `shift` low, the register content (and
+  *      `io.bit`) must not change.
   *
-  * Timing model
-  *   `io.bit` is combinational off a register. After we drive `load=1`
-  *   and call `waitSampling()`, the rising edge captures `data` into
-  *   `shiftReg`; on the *next* sim observation `io.bit` reflects
-  *   `data(0)`. The shift loop therefore: sample, drive shift=1,
-  *   waitSampling (this is the cycle the shift commits), drop shift.
-  *   One cycle per shift, no wasted cycles.
+  * Timing model `io.bit` is combinational off a register. After we drive
+  * `load=1` and call `waitSampling()`, the rising edge captures `data` into
+  * `shiftReg`; on the *next* sim observation `io.bit` reflects `data(0)`. The
+  * shift loop therefore: sample, drive shift=1, waitSampling (this is the cycle
+  * the shift commits), drop shift. One cycle per shift, no wasted cycles.
   *
   * Run: `sbt "runMain uart_tx.TxShiftRegSim"`
   */
@@ -46,33 +44,33 @@ object TxShiftRegSim {
 
         // ---------- helpers ----------------------------------------------
 
-        /** Pulse load=1 for one cycle with `value` on data, then wait one
-          * extra cycle so that the combinational `io.bit := shiftReg(0)`
-          * has fully settled to the newly-loaded LSB. Necessary because
-          * `io.bit` is combinational off the register; reads issued in
-          * the same delta as the register update can race.
+        /** Pulse load=1 for one cycle with `value` on data, then wait one extra
+          * cycle so that the combinational `io.bit := shiftReg(0)` has fully
+          * settled to the newly-loaded LSB. Necessary because `io.bit` is
+          * combinational off the register; reads issued in the same delta as
+          * the register update can race.
           */
         def loadByte(value: Int): Unit = {
-          dut.io.data  #= value
-          dut.io.load  #= true
+          dut.io.data #= value
+          dut.io.load #= true
           dut.io.shift #= false
           dut.clockDomain.waitSampling()
-          dut.io.load  #= false
-          dut.io.data  #= 0
+          dut.io.load #= false
+          dut.io.data #= 0
           dut.clockDomain.waitSampling()
         }
 
-        /** Read 8 bits LSB-first by repeatedly shifting, asserting each
-          * matches the expected bit of `value`. After load, the LSB is
-          * already visible on `io.bit` — we sample, then shift to expose
-          * the next bit. The trailing `waitSampling()` after dropping
-          * `shift` gives the combinational `io.bit` a settled cycle
-          * before the next iteration's read.
+        /** Read 8 bits LSB-first by repeatedly shifting, asserting each matches
+          * the expected bit of `value`. After load, the LSB is already visible
+          * on `io.bit` — we sample, then shift to expose the next bit. The
+          * trailing `waitSampling()` after dropping `shift` gives the
+          * combinational `io.bit` a settled cycle before the next iteration's
+          * read.
           */
         def expectByte(value: Int, label: String): Unit = {
           for (i <- 0 until cfg.dataBits) {
             val expected = ((value >> i) & 1) == 1
-            val got      = dut.io.bit.toBoolean
+            val got = dut.io.bit.toBoolean
             assert(
               got == expected,
               f"[$label, byte=0x$value%02X] bit $i: expected $expected, got $got"
@@ -85,9 +83,9 @@ object TxShiftRegSim {
         }
 
         // ---------- init -------------------------------------------------
-        dut.io.load  #= false
+        dut.io.load #= false
         dut.io.shift #= false
-        dut.io.data  #= 0
+        dut.io.data #= 0
         // forkStimulus holds reset asserted for ~10 cycles by default.
         // Wait well past that so the register's `init(0xff)` value is
         // actually present and subsequent loads are not suppressed.
@@ -116,13 +114,13 @@ object TxShiftRegSim {
         //   - both ran   -> ambiguous, but load-wins gives bit=1
         // So observing 1 next cycle proves load-wins.
         val newByte = 0xa5 // LSB = 1
-        dut.io.data  #= newByte
-        dut.io.load  #= true
+        dut.io.data #= newByte
+        dut.io.load #= true
         dut.io.shift #= true
         dut.clockDomain.waitSampling()
-        dut.io.load  #= false
+        dut.io.load #= false
         dut.io.shift #= false
-        dut.io.data  #= 0
+        dut.io.data #= 0
         dut.clockDomain.waitSampling() // settle combinational io.bit
         assert(
           dut.io.bit.toBoolean,
@@ -137,7 +135,7 @@ object TxShiftRegSim {
         val before = dut.io.bit.toBoolean
         assert(before, "hold test: post-load LSB of 0xC3 should be 1")
         // Park: both inputs low for a bunch of cycles.
-        dut.io.load  #= false
+        dut.io.load #= false
         dut.io.shift #= false
         dut.clockDomain.waitSampling(20)
         val after = dut.io.bit.toBoolean

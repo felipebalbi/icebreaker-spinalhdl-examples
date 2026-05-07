@@ -33,15 +33,14 @@ object ParityType extends SpinalEnum {
   *   Number of stop bits (1 or 2). Stop bits are just extra high-level idle
   *   time at the end of a frame.
   * @param parity
-  *   Parity scheme — see [[ParityType]]. Drives both the parity bit on the
-  *   wire and whether a `parityState` exists in the FSM at all.
+  *   Parity scheme — see [[ParityType]]. Drives both the parity bit on the wire
+  *   and whether a `parityState` exists in the FSM at all.
   * @param useCts
-  *   If `true` (default), expose a `cts` input pin and gate the start of
-  *   each frame on it being high (active-high "I can receive"). If
-  *   `false`, the `cts` port is omitted entirely and frames start as
-  *   soon as a byte is offered. Set this to `false` for connections
-  *   where the far end has no flow control, or to save a top-level pin
-  *   on the FPGA.
+  *   If `true` (default), expose a `cts` input pin and gate the start of each
+  *   frame on it being high (active-high "I can receive"). If `false`, the
+  *   `cts` port is omitted entirely and frames start as soon as a byte is
+  *   offered. Set this to `false` for connections where the far end has no flow
+  *   control, or to save a top-level pin on the FPGA.
   */
 case class UartTxConfig(
     clkFreqHz: Int = 12000000,

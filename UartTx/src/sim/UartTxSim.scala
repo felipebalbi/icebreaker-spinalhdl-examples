@@ -5,65 +5,50 @@ import spinal.core.sim._
 
 /** Standalone sim for [[UartTx]] — the full wrapper.
   *
-  * Where [[TxFsmSim]] tested the FSM in isolation by faking its
-  * neighbours, this sim treats `UartTx` as a black box: drive the
-  * `data` Stream in, watch the `tx` line out, and recover frames the
-  * same way a real receiver would. The real BaudGenerator, real
-  * TxShiftReg, and real TxFsm are all in the loop.
+  * Where [[TxFsmSim]] tested the FSM in isolation by faking its neighbours,
+  * this sim treats `UartTx` as a black box: drive the `data` Stream in, watch
+  * the `tx` line out, and recover frames the same way a real receiver would.
+  * The real BaudGenerator, real TxShiftReg, and real TxFsm are all in the loop.
   *
   * What we verify
   *   1. **Idle line.** After reset, `io.tx` sits high.
+  *   2. **Single-byte round trip.** Across a small pattern set (0x00, 0xFF,
+  *      0xAA, 0x55, 0xAD), drive a byte through the Stream and recover the bits
+  *      via mid-bit sampling on `io.tx`. Verify start=0, the LSB-first data,
+  *      optional parity, and stop=1.
+  *   3. **Back-to-back transmission.** Hold `data.valid` continuously high
+  *      while feeding new payloads each handshake. Confirm each byte arrives
+  *      intact with no missing or extra bit periods.
   *
-  *   2. **Single-byte round trip.** Across a small pattern set
-  *      (0x00, 0xFF, 0xAA, 0x55, 0xAD), drive a byte through the
-  *      Stream and recover the bits via mid-bit sampling on `io.tx`.
-  *      Verify start=0, the LSB-first data, optional parity, and
-  *      stop=1.
+  * 3b. **Single continuous burst.** Strictly tighter than (3): the producer
+  * holds `valid` high across N frames and only swaps the payload between
+  * handshakes — `valid` never falls until the last byte is accepted. Catches
+  * bugs that would slip past (3) such as an FSM requiring `valid` to deassert
+  * between frames, or stale-payload latching.
   *
-  *   3. **Back-to-back transmission.** Hold `data.valid` continuously
-  *      high while feeding new payloads each handshake. Confirm each
-  *      byte arrives intact with no missing or extra bit periods.
+  *   4. **Handshake timing.** `data.ready` is high in idle, drops the cycle a
+  *      frame starts, and stays low until the FSM is back in idle. The byte
+  *      gets accepted on the same cycle as the FSM leaves idle (which is also
+  *      the cycle TxShiftReg latches the payload — see TxFsm and TxShiftReg for
+  *      the load-priority contract).
+  *   5. **CTS gates a NEW frame.** With `cts=0`, asserting `data.valid` must
+  *      NOT trigger a transmit: `data.ready` stays low and `io.tx` stays high.
+  *      Raising `cts` then lets the byte transmit normally.
+  *   6. **CTS dropped MID-frame does NOT abort.** Once a frame has started,
+  *      dropping `cts` to 0 must let the in-flight frame complete cleanly. CTS
+  *      gates the *start* of new frames, not the in-flight one.
+  *   7. **Config-matrix smoke.** Run a couple of bytes through 8N1, 8N2, 8E1,
+  *      and 8O1 to confirm `cfg` is correctly threaded through to all
+  *      sub-blocks.
+  *   8. **`useCts = false`.** A separate elaboration drops the `cts` port
+  *      entirely and confirms a byte still transmits — proving the
+  *      optional-port idiom works and the gate cleanly synthesises away.
   *
-  *   3b. **Single continuous burst.** Strictly tighter than (3): the
-  *      producer holds `valid` high across N frames and only swaps
-  *      the payload between handshakes — `valid` never falls until
-  *      the last byte is accepted. Catches bugs that would slip past
-  *      (3) such as an FSM requiring `valid` to deassert between
-  *      frames, or stale-payload latching.
-  *
-  *   4. **Handshake timing.** `data.ready` is high in idle, drops the
-  *      cycle a frame starts, and stays low until the FSM is back in
-  *      idle. The byte gets accepted on the same cycle as the FSM
-  *      leaves idle (which is also the cycle TxShiftReg latches the
-  *      payload — see TxFsm and TxShiftReg for the load-priority
-  *      contract).
-  *
-  *   5. **CTS gates a NEW frame.** With `cts=0`, asserting
-  *      `data.valid` must NOT trigger a transmit: `data.ready` stays
-  *      low and `io.tx` stays high. Raising `cts` then lets the byte
-  *      transmit normally.
-  *
-  *   6. **CTS dropped MID-frame does NOT abort.** Once a frame has
-  *      started, dropping `cts` to 0 must let the in-flight frame
-  *      complete cleanly. CTS gates the *start* of new frames, not
-  *      the in-flight one.
-  *
-  *   7. **Config-matrix smoke.** Run a couple of bytes through 8N1,
-  *      8N2, 8E1, and 8O1 to confirm `cfg` is correctly threaded
-  *      through to all sub-blocks.
-  *
-  *   8. **`useCts = false`.** A separate elaboration drops the `cts`
-  *      port entirely and confirms a byte still transmits — proving
-  *      the optional-port idiom works and the gate cleanly
-  *      synthesises away.
-  *
-  * Mid-bit sampling
-  *   To recover a frame we wait for the falling edge of the start
-  *   bit, walk to the *middle* of the start bit (`ticksPerBit/2`
-  *   cycles further), then advance one full `ticksPerBit` per bit.
-  *   This is exactly what a real UART RX does, and it tolerates the
-  *   1-cycle pipeline delay introduced by `TxFsm`'s registered txReg
-  *   without any special accounting in the test.
+  * Mid-bit sampling To recover a frame we wait for the falling edge of the
+  * start bit, walk to the *middle* of the start bit (`ticksPerBit/2` cycles
+  * further), then advance one full `ticksPerBit` per bit. This is exactly what
+  * a real UART RX does, and it tolerates the 1-cycle pipeline delay introduced
+  * by `TxFsm`'s registered txReg without any special accounting in the test.
   *
   * Run: `sbt "runMain uart_tx.UartTxSim"`
   */
@@ -71,8 +56,8 @@ object UartTxSim {
 
   /** Run the standard test plan for one wrapper config.
     *
-    * Tests 5 and 6 (CTS gating) are skipped when `cfg.useCts == false`
-    * because there's no port to drive.
+    * Tests 5 and 6 (CTS gating) are skipped when `cfg.useCts == false` because
+    * there's no port to drive.
     */
   def runTopTest(
       cfg: UartTxConfig,
@@ -96,49 +81,46 @@ object UartTxSim {
 
         // ---------- helpers ----------------------------------------------
 
-        /** Default-deassert all driven inputs. CTS, when present, defaults
-          * to high so frames can start; tests that exercise the gate set
-          * it explicitly.
+        /** Default-deassert all driven inputs. CTS, when present, defaults to
+          * high so frames can start; tests that exercise the gate set it
+          * explicitly.
           */
         def initInputs(): Unit = {
-          dut.io.data.valid   #= false
+          dut.io.data.valid #= false
           dut.io.data.payload #= 0
           if (cfg.useCts) dut.io.cts #= true
         }
 
-        /** Push a single byte through the Stream, blocking until the
-          * handshake completes (ready ∧ valid). Drops `valid` after the
-          * accepting edge so the next byte must be re-offered explicitly.
+        /** Push a single byte through the Stream, blocking until the handshake
+          * completes (ready ∧ valid). Drops `valid` after the accepting edge so
+          * the next byte must be re-offered explicitly.
           */
         def sendByte(b: Int): Unit = {
           dut.io.data.payload #= b
-          dut.io.data.valid   #= true
+          dut.io.data.valid #= true
           // Wait for the wrapper to assert ready while we hold valid.
           // ready can already be high before we get here, so check
           // post-edge.
-          do { dut.clockDomain.waitSampling() } while (
-            !dut.io.data.ready.toBoolean
-          )
+          do { dut.clockDomain.waitSampling() }
+          while (!dut.io.data.ready.toBoolean)
           dut.io.data.valid #= false
         }
 
-        /** Push N bytes as a single continuous Stream burst: `valid` is
-          * held high the whole time, the payload is swapped on each ready
-          * edge, and `valid` is only dropped after the LAST byte is
-          * accepted. This exercises the "producer never deasserts valid"
-          * contract of Stream and catches bugs that wouldn't show up
-          * with `sendByte` (which drops valid between bytes), e.g. an FSM
-          * that requires valid to fall before launching the next frame,
-          * or stale-payload latching when payload changes the same cycle
-          * the wrapper accepts.
+        /** Push N bytes as a single continuous Stream burst: `valid` is held
+          * high the whole time, the payload is swapped on each ready edge, and
+          * `valid` is only dropped after the LAST byte is accepted. This
+          * exercises the "producer never deasserts valid" contract of Stream
+          * and catches bugs that wouldn't show up with `sendByte` (which drops
+          * valid between bytes), e.g. an FSM that requires valid to fall before
+          * launching the next frame, or stale-payload latching when payload
+          * changes the same cycle the wrapper accepts.
           */
         def sendBurst(bytes: Seq[Int]): Unit = {
           for (b <- bytes) {
             dut.io.data.payload #= b
-            dut.io.data.valid   #= true
-            do { dut.clockDomain.waitSampling() } while (
-              !dut.io.data.ready.toBoolean
-            )
+            dut.io.data.valid #= true
+            do { dut.clockDomain.waitSampling() }
+            while (!dut.io.data.ready.toBoolean)
             // intentionally NOT dropping valid here — payload simply
             // changes on the next loop iteration.
           }
@@ -146,8 +128,8 @@ object UartTxSim {
         }
 
         /** Wait until `io.tx` falls (the start of the next frame) or
-          * `timeoutBits` bit-periods pass. Returns true if the edge was
-          * seen; false on timeout.
+          * `timeoutBits` bit-periods pass. Returns true if the edge was seen;
+          * false on timeout.
           */
         def waitForStartEdge(timeoutBits: Int): Boolean = {
           var cycles = 0
@@ -161,10 +143,10 @@ object UartTxSim {
 
         /** Recover one frame from the line by mid-bit sampling.
           *
-          * Caller must already have observed the falling edge of the
-          * start bit (i.e. `io.tx` is currently low and we're somewhere
-          * inside the start-bit window). We walk to the middle of the
-          * start bit, then advance one full bit period per sample.
+          * Caller must already have observed the falling edge of the start bit
+          * (i.e. `io.tx` is currently low and we're somewhere inside the
+          * start-bit window). We walk to the middle of the start bit, then
+          * advance one full bit period per sample.
           *
           * Returns (startBit, dataBitsLsbFirst, parityOpt, firstStopBit).
           */
@@ -189,8 +171,8 @@ object UartTxSim {
           (start, data, parity, stop)
         }
 
-        /** Reassemble the data bits (LSB-first) into an integer for
-          * comparison against the expected byte.
+        /** Reassemble the data bits (LSB-first) into an integer for comparison
+          * against the expected byte.
           */
         def bitsToInt(bits: Seq[Boolean]): Int =
           bits.zipWithIndex.foldLeft(0) { case (acc, (b, i)) =>
@@ -204,7 +186,7 @@ object UartTxSim {
           cfg.parity match {
             case ParityType.None => false
             case ParityType.Even => !even // make total ones even
-            case ParityType.Odd  => even  // make total ones odd
+            case ParityType.Odd  => even // make total ones odd
           }
         }
 
@@ -219,9 +201,12 @@ object UartTxSim {
             s"[$label] timed out waiting for start edge for 0x${byte.toHexString}"
           )
           val (start, data, parity, stop) = sampleFrame()
-          assert(!start, s"[$label] start bit not low for 0x${byte.toHexString}")
+          assert(
+            !start,
+            s"[$label] start bit not low for 0x${byte.toHexString}"
+          )
           val recovered = bitsToInt(data)
-          val mask      = (1 << cfg.dataBits) - 1
+          val mask = (1 << cfg.dataBits) - 1
           assert(
             recovered == (byte & mask),
             s"[$label] data mismatch for 0x${byte.toHexString}: got 0x${recovered.toHexString}"
@@ -279,9 +264,12 @@ object UartTxSim {
             s"[b2b $cfgLabel] timed out waiting for start of 0x${b.toHexString}"
           )
           val (start, data, parity, stop) = sampleFrame()
-          assert(!start, s"[b2b $cfgLabel] start not low for 0x${b.toHexString}")
-          assert(stop,   s"[b2b $cfgLabel] stop not high for 0x${b.toHexString}")
-          val rec  = bitsToInt(data)
+          assert(
+            !start,
+            s"[b2b $cfgLabel] start not low for 0x${b.toHexString}"
+          )
+          assert(stop, s"[b2b $cfgLabel] stop not high for 0x${b.toHexString}")
+          val rec = bitsToInt(data)
           val mask = (1 << cfg.dataBits) - 1
           assert(
             rec == (b & mask),
@@ -315,9 +303,15 @@ object UartTxSim {
             s"[burst $cfgLabel] timed out waiting for start of 0x${b.toHexString}"
           )
           val (start, data, parity, stop) = sampleFrame()
-          assert(!start, s"[burst $cfgLabel] start not low for 0x${b.toHexString}")
-          assert(stop,   s"[burst $cfgLabel] stop not high for 0x${b.toHexString}")
-          val rec  = bitsToInt(data)
+          assert(
+            !start,
+            s"[burst $cfgLabel] start not low for 0x${b.toHexString}"
+          )
+          assert(
+            stop,
+            s"[burst $cfgLabel] stop not high for 0x${b.toHexString}"
+          )
+          val rec = bitsToInt(data)
           val mask = (1 << cfg.dataBits) - 1
           assert(
             rec == (b & mask),
@@ -330,7 +324,8 @@ object UartTxSim {
         }
         burstProducer.join()
         assert(
-          burstRecovered.toSeq == backToBackBytes.map(_ & ((1 << cfg.dataBits) - 1)),
+          burstRecovered.toSeq == backToBackBytes
+            .map(_ & ((1 << cfg.dataBits) - 1)),
           s"[burst $cfgLabel] sequence mismatch: $burstRecovered"
         )
 
@@ -361,7 +356,8 @@ object UartTxSim {
         // Wait for the frame to play out and confirm ready returns high.
         // Frame length: 1 start + dataBits + (parityBits) + stopBits.
         val parityBits = if (cfg.parity != ParityType.None) 1 else 0
-        val frameTicks = (1 + cfg.dataBits + parityBits + cfg.stopBits) * ticksPerBit
+        val frameTicks =
+          (1 + cfg.dataBits + parityBits + cfg.stopBits) * ticksPerBit
         dut.clockDomain.waitSampling(frameTicks + ticksPerBit)
         assert(
           dut.io.data.ready.toBoolean,
@@ -409,7 +405,10 @@ object UartTxSim {
             s"[$cfgLabel] CTS-released data mismatch"
           )
           p5.foreach(p =>
-            assert(p == expectedParity(ctsByte), s"[$cfgLabel] CTS-released parity mismatch")
+            assert(
+              p == expectedParity(ctsByte),
+              s"[$cfgLabel] CTS-released parity mismatch"
+            )
           )
           sender5.join()
           dut.clockDomain.waitSampling(ticksPerBit * 2)
@@ -468,9 +467,8 @@ object UartTxSim {
           )
           // d6 contains d1..d{N-1}; reconstruct only those bits and
           // compare against the matching slice of midFrameByte.
-          val expectedTail = (1 until cfg.dataBits).map(i =>
-            (midFrameByte & (1 << i)) != 0
-          )
+          val expectedTail =
+            (1 until cfg.dataBits).map(i => (midFrameByte & (1 << i)) != 0)
           assert(
             d6 == expectedTail,
             s"[$cfgLabel] mid-frame data tail mismatch: got $d6 expected $expectedTail"
@@ -491,11 +489,11 @@ object UartTxSim {
   }
 
   def main(args: Array[String]): Unit = {
-    val patterns8        = Seq(0x00, 0xff, 0xaa, 0x55, 0xad)
+    val patterns8 = Seq(0x00, 0xff, 0xaa, 0x55, 0xad)
     val backToBackBytes8 = Seq(0x12, 0x34, 0x56, 0x78)
 
     // Use a small clk/baud ratio for fast sim — ticksPerBit = 10.
-    val clk  = 1000000
+    val clk = 1000000
     val baud = 100000
 
     // (7) Config-matrix smoke. The FSM and shift register have already
@@ -503,10 +501,26 @@ object UartTxSim {
     // to confirm the wrapper threads cfg through correctly. Each entry
     // exercises one axis of the config.
     val configs: Seq[(UartTxConfig, Seq[Int], Seq[Int])] = Seq(
-      (UartTxConfig(clk, baud, 8, 1, ParityType.None), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 2, ParityType.None), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 1, ParityType.Even), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 1, ParityType.Odd),  patterns8, backToBackBytes8)
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.None),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 2, ParityType.None),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.Even),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.Odd),
+        patterns8,
+        backToBackBytes8
+      )
     )
 
     for ((cfg, pats, b2b) <- configs) {
@@ -516,7 +530,8 @@ object UartTxSim {
     // (8) useCts=false elaboration. Confirms the optional port idiom
     // works AND that the wrapper still transmits when there's no CTS
     // pin to gate on.
-    val noCtsCfg = UartTxConfig(clk, baud, 8, 1, ParityType.None, useCts = false)
+    val noCtsCfg =
+      UartTxConfig(clk, baud, 8, 1, ParityType.None, useCts = false)
     runTopTest(noCtsCfg, Seq(0xa5, 0x5a), Seq(0x11, 0x22))
   }
 }

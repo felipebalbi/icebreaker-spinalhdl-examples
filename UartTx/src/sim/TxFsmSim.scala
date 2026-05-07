@@ -5,76 +5,63 @@ import spinal.core.sim._
 
 /** Standalone sim for [[TxFsm]].
   *
-  * The DUT here is *just* the FSM, not the wider UartTx. To stand it up
-  * we need a model of its two combinational neighbours:
+  * The DUT here is *just* the FSM, not the wider UartTx. To stand it up we need
+  * a model of its two combinational neighbours:
   *
-  *   - The [[BaudGenerator]]: a sim-side thread that pulses `io.tick`
-  *     for one cycle every `ticksPerBit` cycles, but **only while the
-  *     FSM's `busy` is high** — exactly the contract the real
-  *     wrapper enforces via `baud.io.enable := fsm.io.busy`. The
-  *     phase resets between frames.
-  *
-  *   - The [[TxShiftReg]]: a sim-side mutable byte that:
-  *       * captures `nextByte` on every cycle the FSM pulses
-  *         `io.loadReg` high,
-  *       * shifts right on every cycle the FSM pulses `io.shiftReg`
-  *         high (load wins over shift, matching the real block),
-  *       * exposes its LSB on `io.shiftRegBit` continuously.
+  *   - The [[BaudGenerator]]: a sim-side thread that pulses `io.tick` for one
+  *     cycle every `ticksPerBit` cycles, but **only while the FSM's `busy` is
+  *     high** — exactly the contract the real wrapper enforces via
+  *     `baud.io.enable := fsm.io.busy`. The phase resets between frames.
+  *   - The [[TxShiftReg]]: a sim-side mutable byte that: * captures `nextByte`
+  *     on every cycle the FSM pulses `io.loadReg` high, * shifts right on every
+  *     cycle the FSM pulses `io.shiftReg` high (load wins over shift, matching
+  *     the real block), * exposes its LSB on `io.shiftRegBit` continuously.
   *
   * What we verify
-  *   1. **Bit-pattern correctness.** For each of several test bytes
-  *      (0x00, 0xFF, 0xAA, 0x55, 0x80, 0x01, 0xAD), drive a frame
-  *      and sample `io.txBit` at the *middle* of each bit period.
-  *      The reconstructed sequence must match `[start=0, d0..d7,
-  *      stop=1]`. Mid-bit sampling is exactly how a real UART RX
-  *      recovers data, so this is the canonical correctness test.
-  *      The mix of patterns catches: init-bleed bugs (0x00, 0xFF),
-  *      LSB/MSB swaps (0x80, 0x01), off-by-one shifts (0xAA, 0x55),
-  *      and a generic mix (0xAD).
+  *   1. **Bit-pattern correctness.** For each of several test bytes (0x00,
+  *      0xFF, 0xAA, 0x55, 0x80, 0x01, 0xAD), drive a frame and sample
+  *      `io.txBit` at the *middle* of each bit period. The reconstructed
+  *      sequence must match `[start=0, d0..d7, stop=1]`. Mid-bit sampling is
+  *      exactly how a real UART RX recovers data, so this is the canonical
+  *      correctness test. The mix of patterns catches: init-bleed bugs (0x00,
+  *      0xFF), LSB/MSB swaps (0x80, 0x01), off-by-one shifts (0xAA, 0x55), and
+  *      a generic mix (0xAD).
+  *   2. **`loadReg` pulse count.** Exactly one `loadReg` pulse per frame, fired
+  *      the cycle the FSM accepts.
+  *   3. **`shiftReg` pulse count.** Exactly `dataBits - 1` `shiftReg` pulses
+  *      per frame — the FSM suppresses the dangling shift on the final data
+  *      tick (see TxFsm.scala for why).
+  *   4. **Back-to-back frames.** Holding "start" high across multiple frames
+  *      must work: the FSM should consume `start` once per Idle visit and
+  *      immediately launch the next frame. This is the test that would catch a
+  *      regression to the old `io.start.rise()` behaviour.
+  *   5. **Stop-bit width.** With `cfg.stopBits = 1`, the line must be high for
+  *      `ticksPerBit` cycles after the last data bit (modulo the 1-cycle txReg
+  *      pipeline at each boundary, which mid-bit sampling tolerates by
+  *      construction).
+  *   6. **Two stop bits.** A second elaboration with `cfg.stopBits = 2` runs
+  *      one frame and confirms two stop-bit periods of high line.
+  *   7. **Parity (when enabled).** The expected-frame helper inserts the parity
+  *      bit between the data bits and the stop bit(s), computed as `xor(data)`
+  *      for Even and `xor(data) ^ 1` for Odd. The mid-bit sampler walks through
+  *      it the same way it walks any other bit.
   *
-  *   2. **`loadReg` pulse count.** Exactly one `loadReg` pulse per
-  *      frame, fired the cycle the FSM accepts.
-  *
-  *   3. **`shiftReg` pulse count.** Exactly `dataBits - 1` `shiftReg`
-  *      pulses per frame — the FSM suppresses the dangling shift on
-  *      the final data tick (see TxFsm.scala for why).
-  *
-  *   4. **Back-to-back frames.** Holding "start" high across multiple
-  *      frames must work: the FSM should consume `start` once per
-  *      Idle visit and immediately launch the next frame. This is
-  *      the test that would catch a regression to the old
-  *      `io.start.rise()` behaviour.
-  *
-  *   5. **Stop-bit width.** With `cfg.stopBits = 1`, the line must be
-  *      high for `ticksPerBit` cycles after the last data bit
-  *      (modulo the 1-cycle txReg pipeline at each boundary, which
-  *      mid-bit sampling tolerates by construction).
-  *
-  *   6. **Two stop bits.** A second elaboration with
-  *      `cfg.stopBits = 2` runs one frame and confirms two stop-bit
-  *      periods of high line.
-  *
-  *   7. **Parity (when enabled).** The expected-frame helper inserts
-  *      the parity bit between the data bits and the stop bit(s),
-  *      computed as `xor(data)` for Even and `xor(data) ^ 1` for
-  *      Odd. The mid-bit sampler walks through it the same way it
-  *      walks any other bit.
-  *
-  *      Parity is implemented in [[TxFsm]] as an FSM-local
-  *      accumulator (see the "Parity" section in TxFsm's top-of-file
-  *      comment), so all parity-enabled configs in `main`
-  *      (8E1/8E2/8O1/8O2/5E1/5E2/5O1/5O2) are expected to pass.
+  * Parity is implemented in [[TxFsm]] as an FSM-local accumulator (see the
+  * "Parity" section in TxFsm's top-of-file comment), so all parity-enabled
+  * configs in `main` (8E1/8E2/8O1/8O2/5E1/5E2/5O1/5O2) are expected to pass.
   *
   * Run: `sbt "runMain uart_tx.TxFsmSim"`
   */
 object TxFsmSim {
 
-  /** Test plan executed against a freshly-elaborated [[TxFsm]] DUT.
-    * Pulled out of `main` so we can run it for two different configs
-    * (1 stop bit and 2 stop bits) without duplicating code.
+  /** Test plan executed against a freshly-elaborated [[TxFsm]] DUT. Pulled out
+    * of `main` so we can run it for two different configs (1 stop bit and 2
+    * stop bits) without duplicating code.
     *
-    * @param patterns        bytes to transmit and verify in test (1)
-    * @param backToBackBytes bytes to transmit in the back-to-back test (4)
+    * @param patterns
+    *   bytes to transmit and verify in test (1)
+    * @param backToBackBytes
+    *   bytes to transmit in the back-to-back test (4)
     */
   def runFsmTest(
       cfg: UartTxConfig,
@@ -102,7 +89,7 @@ object TxFsmSim {
         // capture; the test sets it before pulsing `start`.
         // ------------------------------------------------------------------
         val mask = (1 << cfg.dataBits) - 1
-        var sreg: Int     = 0xff
+        var sreg: Int = 0xff
         var nextByte: Int = 0
         def expose(): Unit = dut.io.shiftRegBit #= ((sreg & 1) == 1)
         expose()
@@ -113,7 +100,7 @@ object TxFsmSim {
             // Sampled just after the rising edge — values reflect the
             // cycle that just completed. Match real-RTL register
             // semantics: load wins over shift.
-            val didLoad  = dut.io.loadReg.toBoolean
+            val didLoad = dut.io.loadReg.toBoolean
             val didShift = dut.io.shiftReg.toBoolean
             if (didLoad) {
               sreg = nextByte & mask
@@ -151,7 +138,7 @@ object TxFsmSim {
           // initial poll at sim time 0 used to fire immediately
           // (busy register uninitialized before reset settles).
           val parityBitsTick = if (cfg.parity == ParityType.None) 0 else 1
-          val ticksPerFrame  = 1 + cfg.dataBits + parityBitsTick + cfg.stopBits
+          val ticksPerFrame = 1 + cfg.dataBits + parityBitsTick + cfg.stopBits
           while (true) {
             // Re-arm: wait until we *actually observe* busy=False
             // before looking for the next rising edge. This drains
@@ -178,9 +165,9 @@ object TxFsmSim {
         // Helpers
         // ------------------------------------------------------------------
 
-        /** Wait for the FSM to accept a `start` request (busy goes
-          * high). Drops `start` once accepted so we don't accidentally
-          * launch a second frame.
+        /** Wait for the FSM to accept a `start` request (busy goes high). Drops
+          * `start` once accepted so we don't accidentally launch a second
+          * frame.
           */
         def launchFrame(byte: Int): Unit = {
           nextByte = byte
@@ -190,10 +177,9 @@ object TxFsmSim {
         }
 
         /** Sample `io.txBit` at the middle of each of the
-          * `1 + dataBits + parityBits + stopBits` bit periods of a
-          * frame. Caller must have just launched a frame; this routine
-          * returns once sampling is done but does NOT wait for `busy`
-          * to drop.
+          * `1 + dataBits + parityBits + stopBits` bit periods of a frame.
+          * Caller must have just launched a frame; this routine returns once
+          * sampling is done but does NOT wait for `busy` to drop.
           */
         def sampleFrameMidBit(): Seq[Boolean] = {
           // We're somewhere in the first cycle or two of startState.
@@ -206,8 +192,8 @@ object TxFsmSim {
           // side), so a couple of cycles of slack don't matter.
           dut.clockDomain.waitSampling(ticksPerBit / 2)
           val parityBits = if (cfg.parity == ParityType.None) 0 else 1
-          val nBits      = 1 + cfg.dataBits + parityBits + cfg.stopBits
-          val out        = scala.collection.mutable.ArrayBuffer[Boolean]()
+          val nBits = 1 + cfg.dataBits + parityBits + cfg.stopBits
+          val out = scala.collection.mutable.ArrayBuffer[Boolean]()
           for (i <- 0 until nBits) {
             out += dut.io.txBit.toBoolean
             if (i < nBits - 1) dut.clockDomain.waitSampling(ticksPerBit)
@@ -218,15 +204,16 @@ object TxFsmSim {
         /** Build the expected mid-bit sequence for `byte`:
           * `[0, d0, d1, ..., d{N-1}, parity?, 1, 1, ...]`.
           *
-          * Parity bit is `xor(data bits)` for Even and `~xor(data
-          * bits)` for Odd, so that the total count of 1s in
-          * (data + parity) is even or odd respectively.
+          * Parity bit is `xor(data bits)` for Even and `~xor(data bits)` for
+          * Odd, so that the total count of 1s in (data + parity) is even or odd
+          * respectively.
           */
         def expectedFrame(byte: Int): Seq[Boolean] = {
-          val mask    = (1 << cfg.dataBits) - 1
-          val masked  = byte & mask
-          val dataSeq = (0 until cfg.dataBits).map(i => ((masked >> i) & 1) == 1)
-          val xorAll  = dataSeq.foldLeft(false)(_ ^ _)
+          val mask = (1 << cfg.dataBits) - 1
+          val masked = byte & mask
+          val dataSeq =
+            (0 until cfg.dataBits).map(i => ((masked >> i) & 1) == 1)
+          val xorAll = dataSeq.foldLeft(false)(_ ^ _)
           val paritySeq: Seq[Boolean] = cfg.parity match {
             case ParityType.None => Seq.empty
             case ParityType.Even => Seq(xorAll)
@@ -238,17 +225,17 @@ object TxFsmSim {
         def fmt(bs: Seq[Boolean]): String =
           bs.map(b => if (b) '1' else '0').mkString
 
-        /** Render a frame string with `|` separators between fields so
-          * the parity-bit slot pops out visually in failure messages:
-          * e.g. `0|10110100|1|1` for an 8E1 frame transmitting 0xAD.
+        /** Render a frame string with `|` separators between fields so the
+          * parity-bit slot pops out visually in failure messages: e.g.
+          * `0|10110100|1|1` for an 8E1 frame transmitting 0xAD.
           */
         def fmtFramed(bs: Seq[Boolean]): String = {
           val parityBits = if (cfg.parity == ParityType.None) 0 else 1
-          val expected   = 1 + cfg.dataBits + parityBits + cfg.stopBits
+          val expected = 1 + cfg.dataBits + parityBits + cfg.stopBits
           if (bs.size != expected) return fmt(bs)
-          val sb     = new StringBuilder
-          var idx    = 0
-          sb.append(if (bs(idx)) '1' else '0'); idx += 1                     // start
+          val sb = new StringBuilder
+          var idx = 0
+          sb.append(if (bs(idx)) '1' else '0'); idx += 1 // start
           sb.append('|')
           for (_ <- 0 until cfg.dataBits) {
             sb.append(if (bs(idx)) '1' else '0'); idx += 1
@@ -282,7 +269,7 @@ object TxFsmSim {
         // Init
         // ------------------------------------------------------------------
         dut.io.start #= false
-        dut.io.tick  #= false
+        dut.io.tick #= false
         dut.clockDomain.waitSampling(20)
 
         assert(dut.io.txBit.toBoolean, "TX should idle high after reset")
@@ -305,16 +292,16 @@ object TxFsmSim {
         // of activity. Use a sentinel byte so observed pulses can't
         // be confused with anything else.
         // ------------------------------------------------------------------
-        var loadPulses  = 0
+        var loadPulses = 0
         var shiftPulses = 0
         val counter = fork {
           while (true) {
             dut.clockDomain.waitSampling()
-            if (dut.io.loadReg.toBoolean)  loadPulses  += 1
+            if (dut.io.loadReg.toBoolean) loadPulses += 1
             if (dut.io.shiftReg.toBoolean) shiftPulses += 1
           }
         }
-        loadPulses  = 0
+        loadPulses = 0
         shiftPulses = 0
         expectFrame(0x5a, label = "pulse-count")
         // Allow one extra cycle for the counting thread to observe the
@@ -397,7 +384,7 @@ object TxFsmSim {
   }
 
   def main(args: Array[String]): Unit = {
-    val patterns8        = Seq(0x00, 0xff, 0xaa, 0x55, 0x80, 0x01, 0xad)
+    val patterns8 = Seq(0x00, 0xff, 0xaa, 0x55, 0x80, 0x01, 0xad)
     val backToBackBytes8 = Seq(0x12, 0x34, 0x56, 0x78)
 
     // 5-bit equivalents — must fit in 5 bits, so each pattern is
@@ -406,11 +393,11 @@ object TxFsmSim {
     //   0x10, 0x01 : LSB / MSB extremes
     //   0x15, 0x0a : alternating
     //   0x0d       : generic mix
-    val patterns5        = Seq(0x00, 0x1f, 0x15, 0x0a, 0x10, 0x01, 0x0d)
+    val patterns5 = Seq(0x00, 0x1f, 0x15, 0x0a, 0x10, 0x01, 0x0d)
     val backToBackBytes5 = Seq(0x12, 0x14, 0x16, 0x18)
 
     // Use a small clk/baud ratio for fast sim — ticksPerBit = 10.
-    val clk  = 1000000
+    val clk = 1000000
     val baud = 100000
 
     // Sweep matrix the user asked for. Listed roughly easiest-first so
@@ -420,19 +407,59 @@ object TxFsmSim {
     //   - 5E*/5O* exercise both parity AND the dataBits axis
     val configs: Seq[(UartTxConfig, Seq[Int], Seq[Int])] = Seq(
       // 8N1, 8N2 — baseline (no parity, exercises stop-bit count)
-      (UartTxConfig(clk, baud, 8, 1, ParityType.None), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 2, ParityType.None), patterns8, backToBackBytes8),
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.None),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 2, ParityType.None),
+        patterns8,
+        backToBackBytes8
+      ),
       // 8E1, 8E2 — even parity
-      (UartTxConfig(clk, baud, 8, 1, ParityType.Even), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 2, ParityType.Even), patterns8, backToBackBytes8),
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.Even),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 2, ParityType.Even),
+        patterns8,
+        backToBackBytes8
+      ),
       // 8O1, 8O2 — odd parity
-      (UartTxConfig(clk, baud, 8, 1, ParityType.Odd), patterns8, backToBackBytes8),
-      (UartTxConfig(clk, baud, 8, 2, ParityType.Odd), patterns8, backToBackBytes8),
+      (
+        UartTxConfig(clk, baud, 8, 1, ParityType.Odd),
+        patterns8,
+        backToBackBytes8
+      ),
+      (
+        UartTxConfig(clk, baud, 8, 2, ParityType.Odd),
+        patterns8,
+        backToBackBytes8
+      ),
       // 5E1, 5E2, 5O1, 5O2 — same parity matrix at 5 data bits
-      (UartTxConfig(clk, baud, 5, 1, ParityType.Even), patterns5, backToBackBytes5),
-      (UartTxConfig(clk, baud, 5, 2, ParityType.Even), patterns5, backToBackBytes5),
-      (UartTxConfig(clk, baud, 5, 1, ParityType.Odd), patterns5, backToBackBytes5),
-      (UartTxConfig(clk, baud, 5, 2, ParityType.Odd), patterns5, backToBackBytes5)
+      (
+        UartTxConfig(clk, baud, 5, 1, ParityType.Even),
+        patterns5,
+        backToBackBytes5
+      ),
+      (
+        UartTxConfig(clk, baud, 5, 2, ParityType.Even),
+        patterns5,
+        backToBackBytes5
+      ),
+      (
+        UartTxConfig(clk, baud, 5, 1, ParityType.Odd),
+        patterns5,
+        backToBackBytes5
+      ),
+      (
+        UartTxConfig(clk, baud, 5, 2, ParityType.Odd),
+        patterns5,
+        backToBackBytes5
+      )
     )
 
     for ((cfg, pats, b2b) <- configs) {

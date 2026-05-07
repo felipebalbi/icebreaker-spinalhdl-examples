@@ -5,16 +5,16 @@ import spinal.lib._
 
 /** UART transmitter (TX-only half).
   *
-  * Top-level shape: a Stream of bytes in, a serial line out, plus an
-  * optional CTS input for hardware flow control.
+  * Top-level shape: a Stream of bytes in, a serial line out, plus an optional
+  * CTS input for hardware flow control.
   *
   * Frame format on the wire (8N1 by default):
-  *   - idle   : line stays high
-  *   - start  : single low bit, one bit period long
-  *   - data   : `cfg.dataBits` bits, **LSB first** (UART convention)
+  *   - idle : line stays high
+  *   - start : single low bit, one bit period long
+  *   - data : `cfg.dataBits` bits, **LSB first** (UART convention)
   *   - parity : optional, one bit (when `cfg.parity != None`)
-  *   - stop   : `cfg.stopBits` high bits
-  *   - idle   : line returns high
+  *   - stop : `cfg.stopBits` high bits
+  *   - idle : line returns high
   *
   * Internally this composes:
   *   - a [[BaudGenerator]] producing one tick per bit period
@@ -34,11 +34,10 @@ case class UartTx(cfg: UartTxConfig) extends Component {
     /** Byte input, ready/valid handshake.
       *
       * Producer drives `data.valid` with a byte on `data.payload`. UartTx
-      * asserts `data.ready` only when it is idle (and `cts` permits, when
-      * flow control is enabled). A transfer occurs on any cycle where both
-      * are high; from that cycle the byte is "owned" by UartTx and shifted
-      * out over the next ~10 bit periods, during which `data.ready` stays
-      * low.
+      * asserts `data.ready` only when it is idle (and `cts` permits, when flow
+      * control is enabled). A transfer occurs on any cycle where both are high;
+      * from that cycle the byte is "owned" by UartTx and shifted out over the
+      * next ~10 bit periods, during which `data.ready` stays low.
       */
     val data = slave Stream (Bits(cfg.dataBits bits))
 
@@ -50,16 +49,16 @@ case class UartTx(cfg: UartTxConfig) extends Component {
 
     /** Clear-To-Send input from the far end (active high = "I can receive").
       *
-      * This is the *local* TX's CTS input, fed by the *remote* RX's RTS
-      * output via the cable. When low, UartTx must not start a new frame
-      * — it gates `data.ready` so the producer is held off until the far
-      * end has buffer space again.
+      * This is the *local* TX's CTS input, fed by the *remote* RX's RTS output
+      * via the cable. When low, UartTx must not start a new frame — it gates
+      * `data.ready` so the producer is held off until the far end has buffer
+      * space again.
       *
       * Only present when `cfg.useCts` is `true` (the default). Setting
-      * `cfg.useCts = false` removes this port entirely, which is useful
-      * for connections without flow control or to save a top-level FPGA
-      * pin. Once a frame has started, dropping CTS does NOT abort it —
-      * CTS gates only the *start* of new frames.
+      * `cfg.useCts = false` removes this port entirely, which is useful for
+      * connections without flow control or to save a top-level FPGA pin. Once a
+      * frame has started, dropping CTS does NOT abort it — CTS gates only the
+      * *start* of new frames.
       */
     val cts = cfg.useCts generate (in Bool ())
   }
