@@ -1,0 +1,20 @@
+# 12 MHz clock
+set_io io_clk        35
+set_frequency io_clk 12
+
+# Active-low reset (iCEbreaker user button: pulled high, shorted to
+# ground when pressed)
+set_io io_reset      10
+
+# I²C lines, brought out on PMOD1A. Both are open-drain on the bus
+# itself; the iCE40 SB_IO primitive is configured as bidirectional
+# (driven low or high-Z) inside the design, with external pull-ups
+# on the PMOD adapter.
+#
+# PMOD1A pin map (iCEbreaker rev 1.x):
+#   pin 4  (PMOD1A.1)  → io_scl
+#   pin 2  (PMOD1A.2)  → io_sda
+#
+# Wire external 4.7 kΩ pull-ups from io_scl and io_sda to 3.3 V.
+set_io io_scl         4
+set_io io_sda         2
