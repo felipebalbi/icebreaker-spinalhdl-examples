@@ -218,25 +218,20 @@ USB-UART).
 
 ---
 
-## 🔲 Phase 2 — UartRx and bidirectional demos
+## ✅ Phase 2 — UartRx and bidirectional demos
 
 Same bottom-up rhythm as Phase 1: each block gets its own sim before
 the next one composes it. RX is genuinely harder than TX — the wire
 arrives on no clock you own, so you have to recover bit timing from
 the start-bit edge and oversample to land samples at bit-centers.
 
-**Cross-cutting decisions:**
-- **Config rename:** `UartConfig` → `UartConfig`. The file rename
-  (`UartConfig.scala` → `UartConfig.scala`) is already done as
-  part of the directory/package rename commit; the **case-class
-  name + field additions** (`oversample: Int = 16`, `useRts: Boolean = true`)
-  are the Step 0 work and need a sweep through every importer.
+**Cross-cutting decisions (made up front, all delivered):**
 - **Oversample factor:** `16×` (industry standard, balances jitter
-  tolerance vs. baud-clock divider granularity). New `oversample`
-  field on `UartConfig`.
+  tolerance vs. baud-clock divider granularity). `oversample` field
+  on `UartConfig`.
 - **No new `BaudGenerator`** — instantiate the existing DDS-based one
-  with `freqDiv = clkFreqHz / (baudRate * oversample)` for RX. The
-  RxFsm counts oversample ticks itself.
+  with `cfg.copy(baudRate = cfg.baudRate * cfg.oversample)` for RX.
+  The RxFsm counts oversample ticks itself.
 - **Error reporting:** RX exposes `framingError`, `parityError`, and
   `overrun` as side-band flags pulsed for one cycle alongside `valid`.
 
@@ -435,18 +430,15 @@ aggregate and `.PHONY`.
 
 ### ✅ Step 10 — Demos
 
-Three small synthesizable tops, each picking up where Phase 1's
-`UartTxDemo` left off. All use the explicit ClockDomain pattern from
-`UartTxDemo` (RISING / ASYNC / active-LOW reset).
+Originally planned as three demos (`UartRxDemo` LEDs / `UartEchoDemo`
+loopback / `UartDemo` dual-direction). In the end we built only the
+echo demo: it's the smallest demo that exercises the entire stack
+end-to-end and proves everything works. The LED-only and
+dual-direction variants would have been pure exercise — same
+composition pattern, no new design problems — so they're explicitly
+**not built**. The echo demo is the canonical hardware bring-up.
 
-**10a. `UartRxDemo` — receive only, drive LEDs** *(not yet built)*
-- Wires the iCEbreaker's onboard `rx` pin to `UartRx`.
-- Sinks the payload Stream into the 3 onboard LEDs (R/G/B = received
-  byte's lower 3 bits, latched). Bonus: blink one of them on
-  `framingError` so corruption is visible at a glance.
-- Hardware test: type characters in `picocom`, watch LEDs change.
-
-**10b. `UartEchoDemo` — RX → FIFO → TX** ✅
+**`UartEchoDemo` — RX → FIFO → TX** ✅
 - **What landed:** explicit `ClockDomain` (RISING / ASYNC /
   active-LOW reset, same pattern as `UartTxDemo`); `UartRx +
   StreamFifo[Bits(dataBits)] + UartTx` wired with `<<`; `RegNext`
@@ -466,19 +458,6 @@ Three small synthesizable tops, each picking up where Phase 1's
   overrun any time TX stalled mid-frame. With the FIFO, RX can
   finish a frame while TX is mid-transmit.
 
-**10c. `UartDemo` — both directions, independent** *(not yet built)*
-- Composes one `UartTx` (with `UartTxDemo`'s message ROM still
-  broadcasting) **and** one `UartRx` (echoing input via a small
-  command interpreter, or just forwarding to LEDs).
-- Demonstrates that TX and RX truly run independently, with no
-  shared state, on a single FPGA.
-- Pick which behaviour to ship at implementation time — the
-  scaffolding (clock domain, both wrappers, FIFO between them if
-  desired) is the same.
-
-**`pcf` updates:** ✅ for 10b (`io_rx` added). 10a/10c will need the
-LED pins.
-
 ---
 
 ## 🔲 Stretch goals (optional)
@@ -486,21 +465,19 @@ LED pins.
 - [x] ~~**Internal `StreamFifo`** so bursty producers don't stall.~~
       *Resolved by composition* — `UartTxDemo` instantiates one
       externally instead. See Step 5 above.
-- [x] ~~**Loopback testbench**~~ — superseded by Step 10b
-      (`UartEchoDemo`), which is the same idea promoted from a
-      pure-sim toy to a real hardware demo.
-- [x] ~~**UartRx**~~ — promoted to Phase 2 above (Steps 6–9).
-- [x] ~~**Full `Uart` wrapper**~~ — addressed by Step 10c
-      (`UartDemo`) which composes both directions at the integration
-      layer rather than hiding them behind one bundled module.
+- [x] ~~**Loopback testbench**~~ — superseded by `UartEchoDemo`,
+      which is the same idea promoted from a pure-sim toy to a real
+      hardware demo.
+- [x] ~~**UartRx**~~ — delivered as Phase 2 above (Steps 6–9).
+- [x] ~~**`UartRxDemo` (LEDs) and `UartDemo` (dual-direction)**~~ —
+      explicitly won't-do. Both are pure exercises in the same
+      composition pattern as the echo demo, with no new design
+      problems. Not worth the maintenance burden.
+- [x] ~~**Full `Uart` wrapper**~~ — would have been part of the
+      dual-direction demo, also won't-do.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
       `BaudGeneratorCounter`, parameterise to pick one, compare LUT
       usage in `nextpnr-ice40` reports vs. DDS.
-- [ ] **Rename `UartConfig` → `UartConfig`** (file already renamed
-      to `UartConfig.scala` as part of the directory/package rename
-      commit — still need to update the case-class name and add
-      `oversample`/`useRts` fields). Touches every importer; do it
-      as a single sweep at the start of Step 6 (formally Step 0).
 
 ---
 
