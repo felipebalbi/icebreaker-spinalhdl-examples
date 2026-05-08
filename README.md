@@ -42,15 +42,18 @@ In rough order of complexity (later ones build on patterns introduced earlier):
   details.
 
 **Uart**
-: A from-scratch UART (TX done, RX in progress) that talks to your
-  terminal over the iCEBreaker's USB-serial bridge. Walks through
-  designing each sub-block in isolation — `BaudGenerator`, `TxShiftReg`,
-  a parameterizable `UartConfig` — then wires them together in a
-  `UartTx` top-level. A separate `UartTxDemo` drives that core to
-  cheerfully spam "Hello, world\r\n" at your `screen` session. The
+: A from-scratch full UART (TX + RX, working end-to-end on real
+  hardware) that talks to your terminal over the iCEBreaker's
+  USB-serial bridge. Walks through designing each sub-block in
+  isolation — `BaudGenerator`, `TxShiftReg` / `RxShiftReg`,
+  `TxFsm` / `RxFsm`, the `RxSync` 2-FF synchronizer, a
+  parameterizable `UartConfig` — then composes them into `UartTx`
+  and `UartRx` wrappers, then assembles those into `UartEchoDemo`:
+  type a character in `picocom`, watch it come straight back. The
   interesting part isn't the protocol (it's a shift register with
   opinions); it's the workflow: spec → sub-block → simulation →
-  composition → bitstream → blinking cursor on real hardware.
+  composition → bitstream → blinking cursor on real hardware,
+  repeated for both directions.
 
 ## The board
 
