@@ -56,7 +56,7 @@ $(ASC): $(JSON) $(PCF)
 $(BIN): $(ASC)
 	$(ICEPACK) $< $@
 
-sim: sim-baud sim-txshiftreg sim-fsm sim-top sim-rxsync sim-rxshiftreg sim-rxfsm ## Run all simulations
+sim: sim-baud sim-txshiftreg sim-fsm sim-txtop sim-rxsync sim-rxshiftreg sim-rxfsm sim-rxtop ## Run all simulations
 
 sim-baud: ## Run BaudGenerator simulation
 	$(SBT) -batch "runMain $(PACKAGE).BaudGeneratorSim"
@@ -67,7 +67,7 @@ sim-txshiftreg: ## Run TxShiftReg simulation
 sim-fsm: ## Run TxFsm simulation
 	$(SBT) -batch "runMain $(PACKAGE).TxFsmSim"
 
-sim-top: ## Run UartTx (top-level) simulation
+sim-txtop: ## Run UartTx (top-level) simulation
 	$(SBT) -batch "runMain $(PACKAGE).$(SIM_MAIN)"
 
 sim-rxsync: ## Run RxSync simulation
@@ -78,6 +78,9 @@ sim-rxshiftreg: ## Run RxShiftReg simulation
 
 sim-rxfsm: ## Run RxFsm simulation
 	$(SBT) -batch "runMain $(PACKAGE).RxFsmSim"
+
+sim-rxtop: ## Run UartRx (top-level) simulation
+	$(SBT) -batch "runMain $(PACKAGE).UartRxSim"
 
 waves: ## Open the most recent simulation VCD in gtkwave
 	@vcd=$$(find $(SIM_DIR) -name '*.vcd' -printf '%T@ %p\n' 2>/dev/null \
@@ -103,4 +106,4 @@ help: ## Show this help (every target with a ## description)
 		/^[a-zA-Z0-9_.-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' \
 		$(MAKEFILE_LIST)
 
-.PHONY: all sim sim-baud sim-shiftreg sim-fsm sim-top sim-rxsync sim-rxshiftreg sim-rxfsm waves flash clean distclean help
+.PHONY: all sim sim-baud sim-shiftreg sim-fsm sim-top sim-rxsync sim-rxshiftreg sim-rxfsm sim-rxtop waves flash clean distclean help
