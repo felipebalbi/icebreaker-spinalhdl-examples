@@ -314,10 +314,10 @@ object UartRxSim {
       (UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false, useRts = false), patterns8),
       (UartConfig(clk, baud, 8, 2, ParityType.None, useCts = false, useRts = false), patterns8),
       (UartConfig(clk, baud, 8, 1, ParityType.Even, useCts = false, useRts = false), patterns8),
-      (UartConfig(clk, baud, 8, 1, ParityType.Odd,  useCts = false, useRts = false), patterns8),
+      (UartConfig(clk, baud, 8, 1, ParityType.Odd, useCts = false, useRts = false), patterns8),
       (UartConfig(clk, baud, 5, 1, ParityType.None, useCts = false, useRts = false), patterns5),
       // RTS path
-      (UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false, useRts = true),  patterns8)
+      (UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false, useRts = true), patterns8)
     )
 
     for ((cfg, pats) <- configs) {

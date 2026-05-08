@@ -37,8 +37,8 @@ import spinal.lib._
   *   Bytes the buffer between RX and TX can hold.
   */
 case class UartEchoDemo(
-  cfg: UartConfig = UartConfig(useCts = false, useRts = false),
-  fifoDepth: Int = 16
+    cfg: UartConfig = UartConfig(useCts = false, useRts = false),
+    fifoDepth: Int = 16
 ) extends Component {
   require(
     !cfg.useCts && !cfg.useRts,
@@ -46,25 +46,26 @@ case class UartEchoDemo(
   )
 
   val io = new Bundle {
+
     /** The board's free-running 12 MHz clock (pcfg maps to pin 32). */
-    val clk = in Bool()
+    val clk = in Bool ()
 
     /** Active-LOW reset from the iCEbreaker user button (pcf maps to
       * pin 10). The button pulls the line high through a pull-up and
       * shorts it to ground when pressed., so "reset asserted" means
       *  the pin is at 0 V.
       */
-    val reset = in Bool()
+    val reset = in Bool ()
 
     /** Serial input from the host's USB-UART TX (pcf maps to pin 6).
       * Idles high; UART frames per `cfg`.
       */
-    val rx = in Bool()
+    val rx = in Bool ()
 
     /** Serial output to the host's USB-UART RX (pcf maps to pin 9).
       * Idles high; UART frames per `cfg`.
       */
-    val tx = out Bool()
+    val tx = out Bool ()
   }
 
   // Build an explicit ClockDomain rather than relying on Spinal's
@@ -94,10 +95,10 @@ case class UartEchoDemo(
   val core = new ClockingArea(mainClockDomain) {
 
     // ----- pure UART halves --------------------------------------------------
-    
+
     val rx = UartRx(cfg)
     val tx = UartTx(cfg)
-    
+
     // ----- echo FIFO ---------------------------------------------------------
     //
     // Sits between RX and TX so a brief TX stall doesn't cause RX to
@@ -105,19 +106,19 @@ case class UartEchoDemo(
     // `push.ready` falls and RX raises `overrun` — but in practice
     // 16 bytes is wildly more than we'll ever queue at matched baud.
     val fifo = StreamFifo(Bits(cfg.dataBits bits), fifoDepth)
-    
+
     // ----- wiring ------------------------------------------------------------
-    
-    rx.io.rx       := io.rx
-    fifo.io.push   << rx.io.payload
-    tx.io.data     << fifo.io.pop
-    
+
+    rx.io.rx := io.rx
+    fifo.io.push << rx.io.payload
+    tx.io.data << fifo.io.pop
+
     // ----- registered output ------------------------------------------------
     //
     // Same idle-high reset trick as UartTxDemo. Costs one flop, gives
     // a clean high level on the line during the first cycle after
     // reset before the FSM has its bearings.
-    val txOut = RegNext(tx.io.tx) init(True)
+    val txOut = RegNext(tx.io.tx) init (True)
   }
 
   io.tx := core.txOut

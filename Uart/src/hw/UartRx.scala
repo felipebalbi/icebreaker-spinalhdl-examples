@@ -58,11 +58,12 @@ import spinal.lib._
   */
 case class UartRx(cfg: UartConfig) extends Component {
   val io = new Bundle {
+
     /** Serial input line, direct from an FPGA pin. Async to our system
       * clock - the wrapper passes this straight into RxSync, which crosses it
       * into our domain via two flops.
       */
-    val rx = in Bool()
+    val rx = in Bool ()
 
     /** Byte output, ready/valid handshake. Producer side.
       *
@@ -73,26 +74,26 @@ case class UartRx(cfg: UartConfig) extends Component {
       * error info, because they pulse for one cycle and clear on the FSM's next
       * visit to idle.
       */
-    val payload = master Stream(Bits(cfg.dataBits bits))
+    val payload = master Stream (Bits(cfg.dataBits bits))
 
     /** Pulsed for one cycle alongside `valid` when the stop bit was sampled
       * low. The byte on `payload` is still presented (you may want to discard
       * it).
       */
-    val framingError = out Bool()
+    val framingError = out Bool ()
 
     /** Pulsed for one cycle alongside `valid` when the received parity bit
       * didn't match the parity of the data bits. Only meaningful when
       * `cfg.parity != ParityType.None`; tied low otherwise (the FSM elides the
       * parity state at elaboration).
       */
-    val parityError = out Bool()
+    val parityError = out Bool ()
 
     /** Pulsed for one cycle when a new frame completes while `payload.valid` is
       * still asserted from a previous frame. The NEW byte ends up on `payload`
       * (the old one is lost). Indicates downstream isn't keeping up.
       */
-    val overrun = out Bool()
+    val overrun = out Bool ()
 
     /** Optional Request-To-Send output, telling the far end's TX that we can
       * accept bytes. Active high.
@@ -106,7 +107,7 @@ case class UartRx(cfg: UartConfig) extends Component {
       *
       *  Setting `cfg.useRts = false` removes this port entirely.
       */
-    val rts = cfg.useRts generate (out Bool())
+    val rts = cfg.useRts generate (out Bool ())
   }
 
   val sync = RxSync()
