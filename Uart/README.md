@@ -109,16 +109,16 @@ Press the user button to reset; release it and you should see
 
 Edit `cfg` (and optionally `message`/`fifoDepth`) in `UartTxDemo.scala`:
 
-| Parameter   | Where           | Effect                                                                      |
-|-------------|-----------------|-----------------------------------------------------------------------------|
-| `clkFreqHz` | `UartTxConfig`  | System clock frequency in Hz (12 MHz for iCEbreaker).                       |
-| `baudRate`  | `UartTxConfig`  | Line rate in bits/s. DDS gets ppm-level accuracy regardless of clock match. |
-| `dataBits`  | `UartTxConfig`  | 5..9 (8 is the universal default).                                          |
-| `stopBits`  | `UartTxConfig`  | 1 or 2.                                                                     |
-| `parity`    | `UartTxConfig`  | None / Even / Odd. Adds a parity slot to the frame when not None.           |
-| `useCts`    | `UartTxConfig`  | Whether to expose a CTS pin and gate frame starts on it.                    |
-| `message`   | `UartTxDemo`    | ASCII string streamed in a loop. Use `\r\n` for terminal line endings.      |
-| `fifoDepth` | `UartTxDemo`    | Bytes the FIFO buffers between the ROM producer and `UartTx`.               |
+| Parameter   | Where        | Effect                                                                      |
+|-------------|--------------|-----------------------------------------------------------------------------|
+| `clkFreqHz` | `UartConfig` | System clock frequency in Hz (12 MHz for iCEbreaker).                       |
+| `baudRate`  | `UartConfig` | Line rate in bits/s. DDS gets ppm-level accuracy regardless of clock match. |
+| `dataBits`  | `UartConfig` | 5..9 (8 is the universal default).                                          |
+| `stopBits`  | `UartConfig` | 1 or 2.                                                                     |
+| `parity`    | `UartConfig` | None / Even / Odd. Adds a parity slot to the frame when not None.           |
+| `useCts`    | `UartConfig` | Whether to expose a CTS pin and gate frame starts on it.                    |
+| `message`   | `UartTxDemo` | ASCII string streamed in a loop. Use `\r\n` for terminal line endings.      |
+| `fifoDepth` | `UartTxDemo` | Bytes the FIFO buffers between the ROM producer and `UartTx`.               |
 
 ## Hardware
 

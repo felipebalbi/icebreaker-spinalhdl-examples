@@ -35,7 +35,7 @@ import spinal.core.sim._
 object TxShiftRegSim {
   def main(args: Array[String]): Unit = {
 
-    val cfg = UartTxConfig(dataBits = 8)
+    val cfg = UartConfig(dataBits = 8)
 
     SimConfig.withWave
       .compile(TxShiftReg(cfg))

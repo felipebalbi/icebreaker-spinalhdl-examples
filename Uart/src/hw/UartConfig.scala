@@ -42,7 +42,7 @@ object ParityType extends SpinalEnum {
   *   offered. Set this to `false` for connections where the far end has no flow
   *   control, or to save a top-level pin on the FPGA.
   */
-case class UartTxConfig(
+case class UartConfig(
     clkFreqHz: Int = 12000000,
     baudRate: Int = 115200,
     dataBits: Int = 8,

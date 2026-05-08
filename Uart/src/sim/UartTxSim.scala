@@ -60,7 +60,7 @@ object UartTxSim {
     * there's no port to drive.
     */
   def runTopTest(
-      cfg: UartTxConfig,
+      cfg: UartConfig,
       patterns: Seq[Int],
       backToBackBytes: Seq[Int]
   ): Unit = {
@@ -498,24 +498,24 @@ object UartTxSim {
     // been exhaustively tested in their own sims; this loop only needs
     // to confirm the wrapper threads cfg through correctly. Each entry
     // exercises one axis of the config.
-    val configs: Seq[(UartTxConfig, Seq[Int], Seq[Int])] = Seq(
+    val configs: Seq[(UartConfig, Seq[Int], Seq[Int])] = Seq(
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.None),
+        UartConfig(clk, baud, 8, 1, ParityType.None),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 2, ParityType.None),
+        UartConfig(clk, baud, 8, 2, ParityType.None),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.Even),
+        UartConfig(clk, baud, 8, 1, ParityType.Even),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.Odd),
+        UartConfig(clk, baud, 8, 1, ParityType.Odd),
         patterns8,
         backToBackBytes8
       )
@@ -529,7 +529,7 @@ object UartTxSim {
     // works AND that the wrapper still transmits when there's no CTS
     // pin to gate on.
     val noCtsCfg =
-      UartTxConfig(clk, baud, 8, 1, ParityType.None, useCts = false)
+      UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false)
     runTopTest(noCtsCfg, Seq(0xa5, 0x5a), Seq(0x11, 0x22))
   }
 }

@@ -29,7 +29,7 @@ object BaudGeneratorSim {
   def main(args: Array[String]): Unit = {
 
     // Small ratio keeps the sim fast while exercising the DDS math.
-    val cfg = UartTxConfig(
+    val cfg = UartConfig(
       clkFreqHz = 1000000,
       baudRate = 100000 // => ticksPerBit = 10
     )

@@ -36,7 +36,7 @@ import spinal.core._
   *                  baud rate (and slightly more LUTs). 24 is plenty for
   *                  any realistic UART.
   */
-case class BaudGenerator(cfg: UartTxConfig, accWidth: Int = 24) extends Component {
+case class BaudGenerator(cfg: UartConfig, accWidth: Int = 24) extends Component {
   val io = new Bundle {
 
     /** Hold low to keep the generator quiescent (acc = 0, no ticks). Raise high

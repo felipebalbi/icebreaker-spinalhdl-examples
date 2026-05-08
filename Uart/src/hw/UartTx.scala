@@ -28,7 +28,7 @@ import spinal.lib._
   * @param cfg
   *   compile-time configuration (clock freq, baud, frame format, useCts)
   */
-case class UartTx(cfg: UartTxConfig) extends Component {
+case class UartTx(cfg: UartConfig) extends Component {
   val io = new Bundle {
 
     /** Byte input, ready/valid handshake.
@@ -98,6 +98,6 @@ object UartTxVerilog {
   def main(args: Array[String]): Unit = {
     SpinalConfig(
       targetDirectory = "gen"
-    ).generateVerilog(UartTx(UartTxConfig()))
+    ).generateVerilog(UartTx(UartConfig()))
   }
 }

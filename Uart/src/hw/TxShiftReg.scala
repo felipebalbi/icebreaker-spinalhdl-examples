@@ -33,7 +33,7 @@ import spinal.core._
   * Width is exactly `cfg.dataBits` bits — start/stop bits are the FSM's
   * responsibility, never pre-loaded into the register.
   */
-case class TxShiftReg(cfg: UartTxConfig) extends Component {
+case class TxShiftReg(cfg: UartConfig) extends Component {
   val io = new Bundle {
 
     /** Parallel load enable. When high on a rising edge, `io.data` is captured

@@ -46,7 +46,7 @@ import spinal.lib._
   *   when wiring up a real producer that produces in bursts.
   */
 case class UartTxDemo(
-    cfg: UartTxConfig = UartTxConfig(useCts = false),
+    cfg: UartConfig = UartConfig(useCts = false),
     message: String = "Hello, World\r\n",
     fifoDepth: Int = 16
 ) extends Component {

@@ -64,7 +64,7 @@ object TxFsmSim {
     *   bytes to transmit in the back-to-back test (4)
     */
   def runFsmTest(
-      cfg: UartTxConfig,
+      cfg: UartConfig,
       patterns: Seq[Int],
       backToBackBytes: Seq[Int]
   ): Unit = {
@@ -405,58 +405,58 @@ object TxFsmSim {
     //   - 8N* exercise the FSM core
     //   - 8E*/8O* exercise the parity accumulator
     //   - 5E*/5O* exercise both parity AND the dataBits axis
-    val configs: Seq[(UartTxConfig, Seq[Int], Seq[Int])] = Seq(
+    val configs: Seq[(UartConfig, Seq[Int], Seq[Int])] = Seq(
       // 8N1, 8N2 — baseline (no parity, exercises stop-bit count)
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.None),
+        UartConfig(clk, baud, 8, 1, ParityType.None),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 2, ParityType.None),
+        UartConfig(clk, baud, 8, 2, ParityType.None),
         patterns8,
         backToBackBytes8
       ),
       // 8E1, 8E2 — even parity
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.Even),
+        UartConfig(clk, baud, 8, 1, ParityType.Even),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 2, ParityType.Even),
+        UartConfig(clk, baud, 8, 2, ParityType.Even),
         patterns8,
         backToBackBytes8
       ),
       // 8O1, 8O2 — odd parity
       (
-        UartTxConfig(clk, baud, 8, 1, ParityType.Odd),
+        UartConfig(clk, baud, 8, 1, ParityType.Odd),
         patterns8,
         backToBackBytes8
       ),
       (
-        UartTxConfig(clk, baud, 8, 2, ParityType.Odd),
+        UartConfig(clk, baud, 8, 2, ParityType.Odd),
         patterns8,
         backToBackBytes8
       ),
       // 5E1, 5E2, 5O1, 5O2 — same parity matrix at 5 data bits
       (
-        UartTxConfig(clk, baud, 5, 1, ParityType.Even),
+        UartConfig(clk, baud, 5, 1, ParityType.Even),
         patterns5,
         backToBackBytes5
       ),
       (
-        UartTxConfig(clk, baud, 5, 2, ParityType.Even),
+        UartConfig(clk, baud, 5, 2, ParityType.Even),
         patterns5,
         backToBackBytes5
       ),
       (
-        UartTxConfig(clk, baud, 5, 1, ParityType.Odd),
+        UartConfig(clk, baud, 5, 1, ParityType.Odd),
         patterns5,
         backToBackBytes5
       ),
       (
-        UartTxConfig(clk, baud, 5, 2, ParityType.Odd),
+        UartConfig(clk, baud, 5, 2, ParityType.Odd),
         patterns5,
         backToBackBytes5
       )

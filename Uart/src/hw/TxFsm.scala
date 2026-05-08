@@ -101,10 +101,10 @@ import spinal.lib.fsm._
   * ==Sub-blocks called out in TODO.md==
   *
   *   - Parity: implemented (Even / Odd / None, see "Parity" above).
-  *   - `cfg.stopBits` is honoured (1 or 2), enforced by `UartTxConfig`.
+  *   - `cfg.stopBits` is honoured (1 or 2), enforced by `UartConfig`.
   *   - The wrapper-level Stream/CTS handshake is `UartTx`'s problem, not ours.
   */
-case class TxFsm(cfg: UartTxConfig) extends Component {
+case class TxFsm(cfg: UartConfig) extends Component {
   val io = new Bundle {
 
     /** Begin-frame request, **level**-sensitive. Sampled on every cycle while

@@ -14,7 +14,7 @@ needs it.
 ---
 
 ## ✅ Done
-- [x] `UartTxConfig` (clkFreqHz, baudRate, dataBits, stopBits, parity, useCts)
+- [x] `UartConfig` (clkFreqHz, baudRate, dataBits, stopBits, parity, useCts)
 - [x] `ParityType` SpinalEnum (None/Even/Odd)
 - [x] `BaudGenerator` (DDS) + sim
 - [x] `TxShiftReg` + sim
@@ -28,7 +28,8 @@ needs it.
 
 ---
 
-## ✅ Step 2 — `TxShiftReg`
+## ✅ Phase 1 - UartTx
+### ✅ Step 2 — `TxShiftReg`
 
 **Goal:** parallel-load a byte, then expose one bit per shift pulse, LSB
 first.
@@ -64,7 +65,7 @@ val io = new Bundle {
 
 ---
 
-## ✅ Step 3 — `TxFsm`
+### ✅ Step 3 — `TxFsm`
 
 **Goal:** sequence one frame:
 `Idle → Start → Data×N → (Parity) → Stop×M → Idle`.
@@ -107,7 +108,7 @@ val io = new Bundle {
 
 ---
 
-## ✅ Step 4 — Wire it all together inside `UartTx`
+### ✅ Step 4 — Wire it all together inside `UartTx`
 
 **File:** `src/hw/UartTx.scala`
 
@@ -165,7 +166,7 @@ io.tx             := fsm.io.txBit
 
 ---
 
-## ✅ Step 5 — Hardware bring-up wrapper
+### ✅ Step 5 — Hardware bring-up wrapper
 
 **File:** `src/hw/UartTxDemo.scala` (new top-level wrapper)
 
@@ -193,7 +194,7 @@ their own buffering aren't forced to pay for a duplicate. See
 
 ---
 
-## ✅ Step 5b — Hardware bring-up (on the board)
+### ✅ Step 5b — Hardware bring-up (on the board)
 
 Confirmed working end-to-end on real hardware:
 
@@ -218,8 +219,8 @@ arrives on no clock you own, so you have to recover bit timing from
 the start-bit edge and oversample to land samples at bit-centers.
 
 **Cross-cutting decisions:**
-- **Config rename:** `UartTxConfig` → `UartConfig`. The file rename
-  (`UartTxConfig.scala` → `UartConfig.scala`) is already done as
+- **Config rename:** `UartConfig` → `UartConfig`. The file rename
+  (`UartConfig.scala` → `UartConfig.scala`) is already done as
   part of the directory/package rename commit; the **case-class
   name + field additions** (`oversample: Int = 16`, `useRts: Boolean = true`)
   are the Step 0 work and need a sweep through every importer.
@@ -411,7 +412,7 @@ all three demos. Add the LED pins for 10a/10c.
 - [ ] **Counter-based `BaudGenerator` variant** — implement as
       `BaudGeneratorCounter`, parameterise to pick one, compare LUT
       usage in `nextpnr-ice40` reports vs. DDS.
-- [ ] **Rename `UartTxConfig` → `UartConfig`** (file already renamed
+- [ ] **Rename `UartConfig` → `UartConfig`** (file already renamed
       to `UartConfig.scala` as part of the directory/package rename
       commit — still need to update the case-class name and add
       `oversample`/`useRts` fields). Touches every importer; do it
