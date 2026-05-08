@@ -149,7 +149,7 @@ object RxShiftRegSim {
           // and not `1 ## seed[N-1:1]`. A follow-up plain-shift cycle
           // with sample=1 then proves the post-clear state is a clean
           // zero ready to receive new data.
-          val seed = 0xADL & mask
+          val seed = 0xadL & mask
           sendByte(seed)
           step(true, true, true) // both signals high — clear must win
           step(false, true, true) // single shift into freshly-cleared reg
@@ -165,7 +165,7 @@ object RxShiftRegSim {
           // ---------- (5) random burst ----------------------------------
           // Fixed seed -> reproducible failures. Bias clear low (it's a
           // rare event in real operation) and shift moderately high.
-          val rng = new scala.util.Random(0xBADC0FFEEL)
+          val rng = new scala.util.Random(0xbadc0ffeeL)
           for (_ <- 0 until 800) {
             val r = rng.nextDouble()
             val clear = r < 0.05
