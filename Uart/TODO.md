@@ -27,6 +27,7 @@ needs it.
       and received cleanly on the desktop's USB-UART.** 🎉
 - [x] `RxSync` (2-FF synchronizer) + sim
 - [x] `RxShiftReg` + sim
+- [x] `RxFsm` + sim
 
 ---
 
@@ -308,51 +309,73 @@ aggregate and `.PHONY`.
 
 ---
 
-### 🔲 Step 8 — `RxFsm` (the heart of the receiver)
+### ✅ Step 8 — `RxFsm` (the heart of the receiver)
 
 **File:** `src/hw/RxFsm.scala`
 
-**Why:** drives RxShiftReg by sampling the synchronized rx line at
-bit-centers. All states use oversample ticks as the time base.
+**What landed:**
+- States: `idle / startVerify / data / parity / stop`. `idle` watches
+  for `io.rx.fall` (1-cycle history); `startVerify` waits
+  `oversample/2` ticks then resamples — glitches that go high again
+  return to idle without ever entering data. `data` shifts a bit per
+  `oversample` ticks, `parity` resamples once and compares against
+  the XOR-accumulated expected parity, `stop` consumes `cfg.stopBits`
+  bit periods and reports framing error if any is low.
+- **Composes `RxShiftReg`** rather than re-implementing the shifter.
+  `clear` is pulsed on entry to `dataState` (not on idle→startVerify)
+  so a rejected glitch never wastes a clear; `shift` is pulsed at
+  every data-bit centre tick. `clear-wins-over-shift` priority makes
+  the wiring safe even though the FSM never raises both same cycle.
+- **Tick contract is different from TX.** RX BaudGenerator must NOT
+  be gated by `busy` — `startVerify` needs ticks immediately after
+  the falling edge. Documented in the top-of-file Scaladoc.
+- **Error/valid asymmetry (intentional, not a bug):**
+  `payloadValidReg` is sticky-until-`fire`; `framingError` /
+  `parityError` / `overrun` are 1-cycle pulses cleared on the next
+  visit to `idle`. Consumers that take >1 cycle to acknowledge a
+  byte must latch the error flags themselves.
+- **Overrun:** if a new frame completes while `valid` is still high,
+  the new byte clobbers the old in `RxShiftReg` during data shifts;
+  consumer reads the new byte tagged with the old `valid` plus an
+  `overrun` pulse. (Conventional UART overrun usually drops the new
+  byte instead. Flagged for follow-up; not changed here.)
+- Parity accumulator seeded `False` for Even, `True` for Odd at
+  `dataState.onEntry`; XORed every data bit. By `parityState` entry
+  it holds the expected received parity bit value. `ParityType.None`
+  elides the parity-state transition at elaboration time so the
+  state synthesises away.
 
-**Suggested states:**
-- **IDLE:** wait for falling edge on syncRx (start-bit detected).
-- **START_VERIFY:** wait `oversample/2` ticks (half a bit) and re-sample.
-  - Still low → real start bit, advance to DATA.
-  - High → glitch, return to IDLE. *This is the key noise-rejection
-    trick; without it a 1-cycle line glitch corrupts a frame.*
-- **DATA:** every `oversample` ticks, pulse `shiftReg.shift`. Repeat
-  `dataBits` times.
-- **PARITY** (only if `cfg.parity != None`): one more sample, compare to
-  expected parity (XOR of data bits, optionally inverted for Even).
-  Latch `parityError` if mismatch.
-- **STOP:** after `oversample` ticks, sample. If low → `framingError`.
-  For 2 stop bits, check again after another `oversample` ticks.
-- **DONE:** present payload + flags as `valid` pulse. If downstream
-  `ready` is low when the next start-bit edge arrives → `overrun`.
+**Sim (`src/sim/RxFsmSim.scala`):**
+- Sweeps the matrix `8N1, 8N2, 8E1, 8O1, 5N1`.
+- Free-running tick fork at oversample rate (NOT gated by `busy`) —
+  this is the key difference from `TxFsmSim`'s tick fork.
+- Sim-side UART line driver (`driveBits`/`frameBits`) walks `io.rx`
+  through start/data/[parity]/stop, holding each level for one full
+  bit period (`oversample × ticksPerOversample` clocks).
+- Tests: post-reset idle, byte sweep, start-bit glitch rejection
+  (1-cycle low pulse on idle line — must NOT trigger a frame),
+  framing error (stop bit low), recovery after framing error,
+  parity error (deliberately corrupted parity bit), back-to-back
+  frames with consumer firing handshake, and overrun (consumer
+  holds `ready` low across two frames — expects `overrun` pulse and
+  `valid` to remain sticky).
+- Uses `clkFreqHz=32000, baudRate=1000, oversample=16,
+  ticksPerOversample=2 → bitClocks = 32` so sims run fast.
 
-**Suggested IO:**
-```scala
-val io = new Bundle {
-  val rx           = in  Bool()                        // synchronized rx
-  val tick         = in  Bool()                        // oversample-rate strobe
-  val payload      = master Stream(Bits(cfg.dataBits bits))
-  val framingError = out Bool()                        // pulsed alongside valid
-  val parityError  = out Bool()                        // pulsed alongside valid
-  val overrun      = out Bool()                        // pulsed if start arrives while !ready
-  val busy         = out Bool()                        // diagnostic
-}
-```
+**Open follow-ups (flagged but not fixed in this step):**
+- **Error-flag stickiness mismatch.** Errors pulse for 1 cycle while
+  `valid` is sticky-until-`fire`. Consumer must latch errors on the
+  same cycle as `valid` if it wants them.
+- **Overrun byte clobber.** New byte overwrites old in the shifter
+  before `valid` is consumed. A more conventional implementation
+  would drop the new byte instead.
+- **`oversample = 1` edge case.** `log2Up(0)` for the half-bit
+  counter width and `(oversample/2) - 1 = -1` both go bad.
+  `UartConfig` currently only enforces `oversample >= 1`. Real
+  default is 16, so not a runtime concern, but worth tightening.
 
-**Sim:** drive a fake UART line by hand. Test cases:
-- every-byte sweep (0x00..0xFF) at 8N1
-- 8N2, 8E1, 8O1 smoke
-- framing error (force stop bit low)
-- parity error (corrupt one data bit, leave parity unchanged)
-- glitch on idle line (1-cycle low) — must NOT trigger a frame
-- back-to-back frames with `ready` always-true (no overrun)
-- back-to-back frames with `ready` deasserted (overrun expected)
-- ±2% baud skew tolerance (slow the test driver, verify still decodes)
+**Makefile:** `sim-rxfsm` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 

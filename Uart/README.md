@@ -67,11 +67,18 @@ Uart/
       TxFsm.scala            idle->start->data->[parity]->stop->idle FSM
       UartTx.scala           the pure transmitter core (Stream in, line out)
       UartTxDemo.scala       clock domain + ROM + FIFO + UartTx, top-level
+      RxSync.scala           2-FF metastability synchronizer for the rx pin
+      RxShiftReg.scala       serial-in/parallel-out shift register (LSB first)
+      RxFsm.scala            idle->verify->data->[parity]->stop->idle FSM
     sim/             SpinalSim testbenches (never see silicon)
       BaudGeneratorSim.scala   tick cadence + DDS accuracy
       TxShiftRegSim.scala      load/shift/hold/load-priority semantics
       TxFsmSim.scala           full frame sequence with parity variants
       UartTxSim.scala          end-to-end byte-on-the-wire decoder
+      RxSyncSim.scala          2-cycle delay + transition fidelity
+      RxShiftRegSim.scala      LSB-first shift-in + clear-priority semantics
+      RxFsmSim.scala           full RX frame: byte sweep + glitch / framing /
+                               parity / overrun coverage
 ```
 
 The Scala package is `uart` for all files regardless of folder.
