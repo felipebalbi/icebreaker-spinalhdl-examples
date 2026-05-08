@@ -235,7 +235,7 @@ the start-bit edge and oversample to land samples at bit-centers.
 
 ---
 
-### 🔲 Step 6 — `RxSync` (2-FF synchronizer)
+### ✅ Step 6 — `RxSync` (2-FF synchronizer)
 
 **File:** `src/hw/RxSync.scala`
 
