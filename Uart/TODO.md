@@ -25,6 +25,8 @@ needs it.
 - [x] `UartTxDemoVerilog` generation entrypoint
 - [x] **Hardware bring-up: `Hello, World\r\n` running on the iCEbreaker
       and received cleanly on the desktop's USB-UART.** 🎉
+- [x] `RxSync` (2-FF synchronizer) + sim
+- [x] `RxShiftReg` + sim
 
 ---
 
@@ -260,29 +262,49 @@ delayed by exactly 2 cycles and never drops/duplicates a transition.
 
 ---
 
-### 🔲 Step 7 — `RxShiftReg`
+### ✅ Step 7 — `RxShiftReg`
 
 **File:** `src/hw/RxShiftReg.scala`
 
-**Why:** mirror of `TxShiftReg` but shifts *in*. Collects bits LSB-first
-into a register that, after `dataBits` shifts, contains the received
-byte ready to hand off.
+**What landed:**
+- LSB-first shift-in: on `shift`, `sreg := sample ## sreg(N-1 downto 1)`.
+  Worked example for 0xAD in the component Scaladoc.
+- **Clear wins over shift** (mirrors `TxShiftReg`'s "load wins over
+  shift" priority). RxFsm contract is to keep the two mutually
+  exclusive (clear at frame entry, shifts at each bit-centre tick),
+  so the priority is normally invisible. The defensive default of
+  "go to known state on collision" matches industry coding-guide
+  convention and keeps TX/RX symmetric.
+- Reset value `0` rather than all-ones: the consumer always issues
+  `clear` at frame start so the reset value is a don't-care, and `0`
+  makes the reset path observationally identical to the clear path
+  (no "did this byte come from reset or a real frame?" ambiguity).
 
-**Suggested IO:**
-```scala
-val io = new Bundle {
-  val clear  = in  Bool()                       // reset reg before each frame
-  val shift  = in  Bool()                       // 1-cycle pulse: capture sampleIn
-  val sample = in  Bool()                       // the bit value to shift in
-  val data   = out Bits(cfg.dataBits bits)      // assembled byte (valid after N shifts)
-}
-```
+**Sim (`src/sim/RxShiftRegSim.scala`):**
+- Sweeps every supported `dataBits` width (5..9) via a `runOne`
+  helper, proving the `cfg.dataBits - 1 downto 1` slice
+  parameterises cleanly.
+- Uses the **record-and-post-validate** recipe from `RxSyncSim`:
+  `onSamplings` records `(clear, shift, sample, data)` on every
+  edge into parallel `ArrayBuffer`s; a single contract loop walks
+  the recording with a tiny in-Scala reference register and asserts
+  at every edge that the recorded `data` matches what the contract
+  predicts. Inline `dut.io.X.toLong` asserts deliberately omitted —
+  they race the post-`waitSampling` register-commit window.
+- **Subtle timing alignment** (documented inline so future sims
+  don't re-hit it): `onSamplings` reads register state BEFORE the
+  edge's update commits, so `dataSeq(k)` is the value just *before*
+  edge k. The contract is therefore
+  `dataSeq(k) = apply(inputs(k-1), dataSeq(k-1))` — index inputs at
+  `k-1`, not `k`. Same effect as the `syncOut(k) == asyncIn(k-2)`
+  alignment in `RxSyncSim` (one register stage = one edge of delay).
+- Coverage: post-reset zero, full byte sweep at every width,
+  clear-wins-over-shift collision plus follow-up shift, hold,
+  800-cycle randomised burst with biased probabilities and fixed
+  PRNG seed (`0xBADC0FFEEL`) for reproducible failures.
 
-**Logic:** on `shift`, `sreg := sample ## sreg(N-1 downto 1)` (LSB
-first, MSB ends up in bit N-1).
-
-**Sim:** clock in known patterns (0x55, 0xAA, 0xC3, …), verify the
-assembled byte after N shifts matches.
+**Makefile:** `sim-rxshiftreg` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 
