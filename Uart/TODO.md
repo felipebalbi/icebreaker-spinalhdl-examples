@@ -28,6 +28,10 @@ needs it.
 - [x] `RxSync` (2-FF synchronizer) + sim
 - [x] `RxShiftReg` + sim
 - [x] `RxFsm` + sim
+- [x] `UartRx` Stream-producing wrapper + sim
+- [x] `UartEchoDemo` (RX → FIFO → TX) + `icebreaker.pcf` `io_rx`
+- [x] **Hardware bring-up: end-to-end echo loop running on the
+      iCEbreaker — `picocom` round-trips characters cleanly.** 🎉
 
 ---
 
@@ -379,55 +383,90 @@ aggregate and `.PHONY`.
 
 ---
 
-### 🔲 Step 9 — `UartRx` wrapper
+### ✅ Step 9 — `UartRx` wrapper
 
 **File:** `src/hw/UartRx.scala`
 
-**Why:** symmetrical wrapper to `UartTx`. Composes `RxSync` +
-`BaudGenerator` (at oversample rate) + `RxShiftReg` + `RxFsm`.
+**What landed:**
+- Composition: `RxSync + BaudGenerator + RxFsm`. Wiring is mostly
+  mechanical mirror of `UartTx`; full Scaladoc explains the two
+  non-obvious choices (below).
+- **BaudGenerator at oversample rate via config-copy trick:**
+  `BaudGenerator(cfg.copy(baudRate = cfg.baudRate * cfg.oversample))`.
+  Avoids a second generator module — the existing DDS just gets a
+  scaled `baudRate` parameter.
+- **Free-running BaudGenerator:** `baud.io.enable := True`, in
+  contrast to `UartTx`'s `enable := fsm.io.busy`. The half-bit
+  verify after the start-bit edge needs ticks immediately, before
+  `busy` could even be asserted; gating on `busy` would put the
+  half-bit sample in the wrong place.
+- **`RxSync` only crossed input:** the FSM is fed `sync.io.syncOut`,
+  not `io.rx`. Skipping the sync would put a metastability hazard on
+  the `io.rx.fall` edge detector — manifests as random framing
+  errors on real silicon.
+- **Optional `useRts`** via `cfg.useRts generate (out Bool())`,
+  symmetric to `useCts` on TX. When enabled, `io.rts := io.payload.ready`
+  (direct mirror — no lead-time before buffer fills, but fine at
+  115200 with even a small upstream FIFO). When disabled, the port is
+  omitted entirely.
+- Three error flags (`framingError`, `parityError`, `overrun`)
+  pass through unchanged from the FSM; they pulse for one cycle
+  alongside `valid` and clear when the FSM next visits idle.
+  Consumers must latch alongside `valid` if they want them.
 
-**Suggested IO:**
-```scala
-val io = new Bundle {
-  val rx           = in  Bool()                       // FPGA pin
-  val payload      = master Stream(Bits(cfg.dataBits bits))
-  val rts          = cfg.useRts generate (out Bool())  // mirror of useCts
-  val framingError = out Bool()
-  val parityError  = out Bool()
-  val overrun      = out Bool()
-}
-```
+**Sim (`src/sim/UartRxSim.scala`):**
+- Black-box test of the wrapper: drive `io.rx` as a fake UART
+  line, watch `io.payload` and the side-band flags. Real
+  `BaudGenerator` and real `RxSync` in the loop (no fakes — both
+  blocks are inside the DUT now).
+- Sweep matrix `8N1, 8N2, 8E1, 8O1, 5N1` plus a `useRts = true`
+  smoke variant.
+- Tests: post-reset idle, byte sweep, framing error + recovery,
+  parity error, overrun, RTS-mirrors-ready. All driver forks
+  captured + `.join()`'d (the lesson from `RxFsmSim` —
+  driver/main-thread races on `io.rx` are undefined).
+- Used scaled `clk = 32 kHz / baud = 1 kHz / oversample = 16` so
+  bit period = 32 sys clocks.
 
-**Optional `useRts`:** symmetric to `useCts` on TX. RTS goes low when
-downstream isn't ready, telling the other side to stop sending.
-Use the same `Bool generate (out Bool())` idiom from `UartTx`.
-
-**Sim:** black-box driver synthesizes UART frames on `io.rx`, walks
-the same test matrix as RxFsm but at the wrapper level (proves all
-the sub-blocks are wired correctly).
+**Makefile:** `sim-rxtop` target added; included in `sim`
+aggregate and `.PHONY`.
 
 ---
 
-### 🔲 Step 10 — Demos
+### ✅ Step 10 — Demos
 
 Three small synthesizable tops, each picking up where Phase 1's
 `UartTxDemo` left off. All use the explicit ClockDomain pattern from
 `UartTxDemo` (RISING / ASYNC / active-LOW reset).
 
-**10a. `UartRxDemo` — receive only, drive LEDs**
+**10a. `UartRxDemo` — receive only, drive LEDs** *(not yet built)*
 - Wires the iCEbreaker's onboard `rx` pin to `UartRx`.
 - Sinks the payload Stream into the 3 onboard LEDs (R/G/B = received
   byte's lower 3 bits, latched). Bonus: blink one of them on
   `framingError` so corruption is visible at a glance.
 - Hardware test: type characters in `picocom`, watch LEDs change.
 
-**10b. `UartEchoDemo` — RX → FIFO → TX**
-- Wires `UartRx.payload` straight into a `StreamFifo` and out to
-  `UartTx.io.data`.
-- The simplest end-to-end proof: `picocom` types "hello", sees "hello"
-  back. Catches almost every wiring bug.
+**10b. `UartEchoDemo` — RX → FIFO → TX** ✅
+- **What landed:** explicit `ClockDomain` (RISING / ASYNC /
+  active-LOW reset, same pattern as `UartTxDemo`); `UartRx +
+  StreamFifo[Bits(dataBits)] + UartTx` wired with `<<`; `RegNext`
+  init-True on the output line. Defaults: `cfg = UartConfig(useCts
+  = false, useRts = false)`, `fifoDepth = 16`. `require(...)` guard
+  rejects configs that ask for flow-control pins this demo doesn't
+  expose.
+- **Verilog entry point:** `UartEchoDemoVerilog`. Makefile `TOP`
+  switched to `UartEchoDemo`.
+- **`icebreaker.pcf`:** added `io_rx` (FT2232 channel B host→FPGA
+  data line).
+- **Hardware bring-up:** confirmed working — `make flash`, attach
+  `picocom -b 115200 /dev/ttyUSB1`, type any character, see it
+  echoed instantly. End-to-end UART working on real silicon. 🎉
+- The FIFO matters even though RX and TX run at the same baud:
+  dropping it would couple back-pressure and force RX-side
+  overrun any time TX stalled mid-frame. With the FIFO, RX can
+  finish a frame while TX is mid-transmit.
 
-**10c. `UartDemo` — both directions, independent**
+**10c. `UartDemo` — both directions, independent** *(not yet built)*
 - Composes one `UartTx` (with `UartTxDemo`'s message ROM still
   broadcasting) **and** one `UartRx` (echoing input via a small
   command interpreter, or just forwarding to LEDs).
@@ -437,8 +476,8 @@ Three small synthesizable tops, each picking up where Phase 1's
   scaffolding (clock domain, both wrappers, FIFO between them if
   desired) is the same.
 
-**`pcf` updates:** add `io_rx` (iCEbreaker FT2232 host→FPGA pin) for
-all three demos. Add the LED pins for 10a/10c.
+**`pcf` updates:** ✅ for 10b (`io_rx` added). 10a/10c will need the
+LED pins.
 
 ---
 
