@@ -13,9 +13,7 @@ val spinalIdslPlugin = compilerPlugin(
 lazy val projectname = (project in file("."))
   .settings(
     name := "pwm_fade",
-
     Compile / scalaSource := baseDirectory.value / "src",
-
     libraryDependencies ++= Seq(
       spinalCore,
       spinalLib,

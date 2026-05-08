@@ -67,7 +67,7 @@ import spinal.lib.fsm._
   * (which is also how a real UART RX recovers data).
   *
   * ==Why `txBit` is registered, and why every state drives it from
- `whenIsActive` (not `onEntry`)==
+  * `whenIsActive` (not `onEntry`)==
   *
   * `txBit` is driven from a register (`txReg`), not a combinational mux over
   * state and `shiftRegBit`. Either would be functionally correct, but the

@@ -65,7 +65,7 @@ object ButtonTopVerilog {
 
     val cfg = DebouncerConfig(
       kind = DebounceKind.Timer, // change here to test (Integrator | Timer)
-      clkFreqHz = 12_000_000,
+      clkFreqHz = 12000000,
       debounceMs = 10,
       width = 16
     )

@@ -101,8 +101,7 @@ object UartTxSim {
           // Wait for the wrapper to assert ready while we hold valid.
           // ready can already be high before we get here, so check
           // post-edge.
-          do { dut.clockDomain.waitSampling() }
-          while (!dut.io.data.ready.toBoolean)
+          do { dut.clockDomain.waitSampling() } while (!dut.io.data.ready.toBoolean)
           dut.io.data.valid #= false
         }
 
@@ -119,8 +118,7 @@ object UartTxSim {
           for (b <- bytes) {
             dut.io.data.payload #= b
             dut.io.data.valid #= true
-            do { dut.clockDomain.waitSampling() }
-            while (!dut.io.data.ready.toBoolean)
+            do { dut.clockDomain.waitSampling() } while (!dut.io.data.ready.toBoolean)
             // intentionally NOT dropping valid here — payload simply
             // changes on the next loop iteration.
           }

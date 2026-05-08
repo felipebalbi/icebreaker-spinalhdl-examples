@@ -30,8 +30,7 @@ import spinal.lib._
   * `PwmFadeTopVerilog.main`, `make`, `make flash`. Done. Also see
   * PwmFade/README.md.
   */
-case class PwmFadeTop(cfg: ModulatorConfig, prescalerWidth: Int = 15)
-    extends Component {
+case class PwmFadeTop(cfg: ModulatorConfig, prescalerWidth: Int = 15) extends Component {
   val io = new Bundle {
     val clk = in Bool ()
     val pwm = out Bool ()

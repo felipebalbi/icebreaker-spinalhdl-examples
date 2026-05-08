@@ -38,6 +38,6 @@ object DebounceKind extends SpinalEnum {
 case class DebouncerConfig(
     kind: DebounceKind.E,
     width: Int = 16,
-    clkFreqHz: Int = 12_000_000,
+    clkFreqHz: Int = 12000000,
     debounceMs: Int = 10
 )

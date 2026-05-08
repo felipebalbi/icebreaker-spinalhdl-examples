@@ -76,7 +76,7 @@ Edit `cfg` in `src/hw/ButtonTop.scala` (object `ButtonTopVerilog`):
 ```scala
 val cfg = DebouncerConfig(
   kind       = DebounceKind.Timer,   // Integrator | Timer
-  clkFreqHz  = 12_000_000,
+  clkFreqHz  = 12000000,
   debounceMs = 10,
   width      = 16
 )

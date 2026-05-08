@@ -19,7 +19,7 @@ object BlinkyWithResetSim {
       .compile(BlinkyWithReset(counterWidth = width))
       .doSim { dut =>
         dut.io.reset #= false // assert reset (active low)
-        dut.io.clk   #= false
+        dut.io.clk #= false
         sleep(1)
 
         def tick(): Unit = {
