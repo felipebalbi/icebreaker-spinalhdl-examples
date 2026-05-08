@@ -14,16 +14,20 @@ object ParityType extends SpinalEnum {
   val None, Even, Odd = newElement()
 }
 
-/** Compile-time configuration for the UART transmitter.
+/** Compile-time configuration for the UART transmitter and receiver.
   *
   * Held as a `case class` so it can be passed by value into every sub-block
-  * (BaudGenerator, FSM, etc.) and used to derive widths / constants at
-  * elaboration time. Nothing in this class survives into hardware — it only
-  * shapes how the hardware is built.
+  * (BaudGenerator, FSM, shift register, etc.) and used to derive widths /
+  * constants at elaboration time. Nothing in this class survives into hardware
+  * — it only shapes how the hardware is built.
+  *
+  * Both halves of the link share one config so a single instance can drive a
+  * symmetric TX + RX pair without risk of one side being built for, say, 8N1
+  * while the other is built for 8E2.
   *
   * @param clkFreqHz
   *   System clock frequency in Hz. Used to size the DDS phase increment so that
-  *   ticks land at the requested baud.
+  *   ticks land at the requested baud (TX) or at the oversample rate (RX).
   * @param baudRate
   *   Target line rate (bits per second).
   * @param dataBits
@@ -32,15 +36,32 @@ object ParityType extends SpinalEnum {
   * @param stopBits
   *   Number of stop bits (1 or 2). Stop bits are just extra high-level idle
   *   time at the end of a frame.
+  * @param oversample
+  *   RX-only: how many times per bit period the receiver samples the line. 16×
+  *   is the industry standard — high enough to tolerate ±2–3% baud skew between
+  *   the two ends and to land samples close to the bit centre even after a
+  *   noisy start-bit edge, low enough to keep the BaudGenerator divider
+  *   (`clkFreqHz / (baudRate * oversample)`) coarse enough to fit. Ignored by
+  *   the TX path.
   * @param parity
-  *   Parity scheme — see [[ParityType]]. Drives both the parity bit on the wire
-  *   and whether a `parityState` exists in the FSM at all.
+  *   Parity scheme — see [[ParityType]]. On TX, drives both the parity bit on
+  *   the wire and whether a `parityState` exists in the FSM at all. On RX,
+  *   drives whether a parity sample is taken and compared.
   * @param useCts
-  *   If `true` (default), expose a `cts` input pin and gate the start of each
-  *   frame on it being high (active-high "I can receive"). If `false`, the
-  *   `cts` port is omitted entirely and frames start as soon as a byte is
-  *   offered. Set this to `false` for connections where the far end has no flow
-  *   control, or to save a top-level pin on the FPGA.
+  *   TX-side flow control. If `true` (default), expose a `cts` *input* pin and
+  *   gate the start of each frame on it being high (active-high "the far end
+  *   can receive"). If `false`, the `cts` port is omitted entirely and frames
+  *   start as soon as a byte is offered. Set this to `false` for connections
+  *   where the far end has no flow control, or to save a top-level pin on the
+  *   FPGA.
+  * @param useRts
+  *   RX-side flow control. If `true` (default), expose an `rts` *output* pin
+  *   that we drive high while we can accept more data and low when we cannot
+  *   (active-high "I can receive"). The far end's TX should gate on this. If
+  *   `false`, the `rts` port is omitted entirely and the receiver simply
+  *   asserts `overrun` if a byte arrives while downstream isn't ready. Note the
+  *   asymmetry with `useCts`: CTS gates *our* TX frame starts, RTS announces
+  *   *our* RX readiness to the other side.
   */
 case class UartConfig(
     clkFreqHz: Int = 12000000,
@@ -48,7 +69,9 @@ case class UartConfig(
     dataBits: Int = 8,
     stopBits: Int = 1,
     parity: ParityType.E = ParityType.None,
-    useCts: Boolean = true
+    useCts: Boolean = true,
+    oversample: Int = 16,
+    useRts: Boolean = true
 ) {
 
   /** Average number of system-clock cycles per UART bit period.
@@ -62,4 +85,5 @@ case class UartConfig(
   require(ticksPerBit >= 1, "clkFreqHz must be >= baudRate")
   require(dataBits >= 5 && dataBits <= 9, "dataBits must be 5..9")
   require(stopBits == 1 || stopBits == 2, "stopBits must be 1 or 2")
+  require(oversample >= 1, "oversample must be >= 1")
 }
