@@ -1,5 +1,5 @@
 PACKAGE  := uart
-TOP      := UartTxDemo
+TOP      := UartEchoDemo
 SIM_MAIN := UartTxSim
 SRC_DIR  := src
 GEN_DIR  := gen

@@ -6,5 +6,8 @@ set_frequency io_clk 12
 # ground when pressed)
 set_io io_reset      10
 
+# UART RX — connect to the host's USB-UART TX
+set_io io_rx         6
+
 # UART TX — connect to the host's USB-UART RX
 set_io io_tx         9
