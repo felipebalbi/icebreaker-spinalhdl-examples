@@ -11,14 +11,66 @@ survives independently of the source.
 
 ---
 
-## 🔲 Phase 0 — Foundations
-- [ ] `I2cConfig` (clkFreqHz, busHz, addrBits=7, useClockStretching)
+## ✅ Done
+- [x] `I2cConfig` (clkFreqHz, busSpeed, addrMode, useClockStretching)
+- [x] `BusSpeed` SpinalEnum (Standard / Fast / FastPlus)
+- [x] `AddrMode` SpinalEnum (SevenBits / TenBits)
+
+---
+
+## ✅ Phase 0 — Foundations
+### ✅ Step 1 — `I2cConfig`
+
+**Goal:** a single, by-value compile-time record that every sub-block
+keys off so widths and counter constants are derived once, at
+elaboration, and the two halves of a controller/target loopback can't
+be accidentally built for mismatched parameters.
+
+**Files:** `src/hw/I2cConfig.scala`.
+
+**What landed:**
+- `I2cConfig(clkFreqHz, busSpeed, addrMode, useClockStretching)` —
+  defaults to 12 MHz / Standard / 7-bit / no stretching, which matches
+  the iCEbreaker + a typical hobby-grade target.
+- Two SpinalEnums instead of the raw `busHz` / `addrBits` fields the
+  TODO sketch suggested:
+  - `BusSpeed` { `Standard` 100 kHz, `Fast` 400 kHz, `FastPlus` 1 MHz }
+  - `AddrMode` { `SevenBits`, `TenBits` }
+
+  This is a strict improvement: it constrains callers to spec speeds,
+  matches the `ParityType` enum pattern from `UartConfig`, lets
+  downstream code pattern-match on a closed set, and gets `FastPlus`
+  support for free.
+- `busFreqHz` derived from `busSpeed` — the single source of truth for
+  the spec-table lookup, so adding a new speed grade is a one-line
+  change.
+- `quarterPeriodCycles = clkFreqHz / (busFreqHz * 4)` — the only
+  timing constant exposed by the config itself. I²C bit-level events
+  (SDA setup, SCL rise, sample, SCL fall) naturally fall on
+  quarter-period boundaries, so this is the right unit for the
+  forthcoming `BusTiming` helper to consume and fan out into the
+  spec-named cycle counts (`tHIGH`, `tLOW`, `tHD;STA`, `tSU;STO`,
+  `tBUF`, …).
+- Two `require` guards:
+  - `clkFreqHz > 0` — catches accidentally-zero or negative clocks.
+  - `quarterPeriodCycles >= 1` with a `(clkFreqHz, busSpeed)`-aware
+    message — catches an undersized system clock that would otherwise
+    silently round to 0 and synthesise a design that never toggles
+    SCL.
+
+**Sim:** none. Pure compile-time `case class` — no RTL to drive. Same
+convention as `UartConfig`; the first sim lands with the first real
+Component (`BusTiming` or `I2cBitController`).
+
+---
+
+## 🔲 Phase 0 — Foundations (remaining)
 - [ ] `I2cIo` bundle: `TriState` SCL + `TriState` SDA
   (drive-low / release-high-Z; never drive high)
-- [ ] `BusTiming` helper — derive `tHigh`, `tLow`, `tHd_sta`,
-  `tSu_sto`, `tBuf` cycle counts from `clkFreqHz` / `busHz`.
-  Should be a pure elaboration-time calculation (just like
-  the UART's BaudGenerator increment).
+- [ ] `BusTiming` helper — consume `I2cConfig.quarterPeriodCycles`
+  and fan it out into `tHigh`, `tLow`, `tHd_sta`, `tSu_sto`, `tBuf`
+  cycle counts. Should be a pure elaboration-time calculation (just
+  like the UART's BaudGenerator increment).
 
 ## 🔲 Phase 1 — Controller (host)
 - [ ] `I2cBitController` — drives one bit at a time given a

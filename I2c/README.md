@@ -4,14 +4,18 @@ A from-scratch I²C **controller** and **target** in SpinalHDL, targeting
 the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
-Status: **scaffolding only** — see `TODO.md` for the bring-up plan.
+Status: **Phase 0 in progress** — `I2cConfig` has landed; `I2cIo`
+bundle and `BusTiming` helper are still to come. See `TODO.md` for
+the full bring-up plan.
 
 ## What's in scope
 
-- Standard-mode (100 kHz) and Fast-mode (400 kHz) bit timing,
-  parameterised via an `I2cConfig` record.
-- 7-bit addressing. (10-bit is a stretch goal — the addressing
-  state in the FSM is the only piece that needs to know.)
+- Standard-mode (100 kHz), Fast-mode (400 kHz) and Fast-mode-Plus
+  (1 MHz) bit timing, parameterised via an `I2cConfig` record and
+  selected with the `BusSpeed` enum.
+- 7-bit addressing, selected via the `AddrMode` enum. (10-bit is a
+  stretch goal — the addressing state in the FSM is the only piece
+  that needs to know, and the enum is already plumbed through.)
 - Open-drain `TriState` SCL/SDA modelled correctly (drive low or
   release; never drive high).
 - Clock stretching — both as a controller (sample SCL, wait if
