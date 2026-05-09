@@ -15,6 +15,8 @@ survives independently of the source.
 - [x] `I2cConfig` (clkFreqHz, busSpeed, addrMode, useClockStretching)
 - [x] `BusSpeed` SpinalEnum (Standard / Fast / FastPlus)
 - [x] `AddrMode` SpinalEnum (SevenBits / TenBits)
+- [x] `I2cIo` bundle: `ReadableOpenDrain` SCL + SDA
+- [x] `I2cIoSim` (sim-side wired-AND glue, reused by later sims)
 
 ---
 
@@ -64,81 +66,66 @@ Component (`BusTiming` or `I2cBitController`).
 
 ---
 
-## 🔲 Phase 0 — Foundations (remaining)
 
-### 🔲 Step 2 — `I2cIo`
+### ✅ Step 2 — `I2cIo`
 
 **Goal:** model the wired-AND, open-drain SCL+SDA pair as a single
 reusable `Bundle` so every block downstream — controller, target,
 demos, sim glue — talks to the bus the same way and can't
 accidentally drive a hard `1`.
 
-**File:** `src/hw/I2cIo.scala`
+**Files:** `src/hw/I2cIo.scala`, `src/sim/I2cIoSim.scala`.
 
-**Suggested IO:**
-```scala
-// One open-drain wire. write is hard-wired to False; only writeEnable
-// is the real control. Helpers below keep callers from repeating the
-// boilerplate (and from forgetting and driving '1' by mistake).
-case class OpenDrainIo() extends Bundle with IMasterSlave {
-  val ctrl = TriState(Bool())              // ctrl.write, .writeEnable, .read
-  def driveLow(): Unit = {                 // pull line to 0
-    ctrl.write       := False
-    ctrl.writeEnable := True
-  }
-  def release(): Unit = {                  // high-Z; pull-up takes over
-    ctrl.write       := False
-    ctrl.writeEnable := False
-  }
-  def sample: Bool = ctrl.read             // what the bus actually shows
-  override def asMaster(): Unit = master(ctrl)
-}
+**What landed:**
+- `case class I2cIo() extends Bundle with IMasterSlave` carrying
+  one `ReadableOpenDrain(Bool())` per line (`scl`, `sda`) plus a
+  `releaseAll()` shorthand for reset paths.
+- **Divergence from the original sketch.** The TODO sketch wrapped
+  `TriState[Bool]` in an `OpenDrainIo` helper class with
+  `driveLow` / `release` methods to police "never drive `1`". The
+  implementation instead reaches for SpinalHDL's stock
+  `ReadableOpenDrain[Bool]` primitive (in `spinal.lib.io`), which
+  is a strict improvement:
+  - **Open-drain semantics are baked in.** `ReadableOpenDrain`
+    has only `(write, read)` — there is no `writeEnable` to
+    forget, and you cannot accidentally drive a hard `1` because
+    there is no second transistor to enable.
+  - **Maps cleanly** to an actual open-drain pad at synthesis
+    (iCE40 `SB_IO` open-drain mode).
+  - **Two wires per line** instead of three.
+  - **Helpers collapse:** `driveLow` / `release` / `sample`
+    become plain `.write := False` / `.write := True` / `.read`,
+    so most call sites need no helper at all.
+  - **Polarity is electrical, not logical:** `write` drives the
+    gate of the open-drain pull-down NMOS, so `False` turns the
+    transistor on (pin → GND, bus low) and `True` turns it off
+    (pin floats, external pull-up wins, bus high). Hence
+    `releaseAll()` writes `True`.
+- **`IMasterSlave`** so a controller declares `master(I2cIo())`
+  and a target declares `slave(I2cIo())`; Spinal flips every
+  nested `ReadableOpenDrain` direction so
+  `controller.io.bus <> target.io.bus` connects in one line.
+- **Sim helper: `I2cIoBus`.** A sim-only `Component` (lives in
+  `src/sim/`, never synthesised) that wires two `I2cIo` slaves
+  through `bus = a.write & b.write` for each line. This is the
+  reusable wired-AND glue every later sim (`I2cBitControllerSim`,
+  `I2cTargetFsmSim`, loopback) composes against — no external
+  pull-up model required.
+- **Bug fixed during review:** the first cut of `I2cIo.scala` was
+  missing all imports (`spinal.core._`, `spinal.lib.IMasterSlave`,
+  `spinal.lib.io.ReadableOpenDrain`) and would not compile. Also
+  fixed a `Pul low` typo.
 
-case class I2cIo() extends Bundle with IMasterSlave {
-  val scl = OpenDrainIo()
-  val sda = OpenDrainIo()
-  override def asMaster(): Unit = { master(scl); master(sda) }
-}
-```
+**Sim (`src/sim/I2cIoSim.scala`):**
+- Compiles `I2cIoBus` and exercises every release/pull-low
+  combination on both lines, asserting that both participants see
+  the same bus state (the wired-AND fan-out has to reach
+  everyone).
+- Includes the "both pull both" case to pin down that contention
+  is *not* an error — wired-AND just resolves to low.
 
-**Design notes:**
-- **Never drive 1.** I²C is wired-AND with an external pull-up; two
-  devices driving against each other = short. `OpenDrainIo.driveLow`
-  / `release` is the only API; `write` is forced to `False` at the
-  bundle boundary so synthesis can never select the high-drive path.
-- **Read is always live.** `sample` is the post-pad value of the
-  bus, including whatever any other device is doing. The
-  bit-controller uses it both for read-bit slots and for
-  arbitration detection (writing `1` means releasing — if the line
-  still reads `0`, someone else is pulling it).
-- **`IMasterSlave`** so `master(I2cIo())` on the controller side
-  meshes with `slave(I2cIo())` on the target side without manual
-  port direction juggling.
-- Top-level pin attachment goes through `inout` in the generated
-  Verilog, which maps to an iCE40 `SB_IO` configured as
-  bidirectional with no internal pull-up — the external 4.7 kΩ
-  pull-ups on the PMOD do the real work.
-- Reset semantics: at reset, `writeEnable := False` so the bus
-  floats high before the FSMs come up. Use `Reg(...) init(False)`
-  inside the bit-controller, not here — `I2cIo` is wires only.
-
-**Sim hints (`src/sim/I2cIoSim.scala`):**
-- Most of this block is wires; the sim is mostly a smoke test that
-  `driveLow` / `release` produce the right `(write, writeEnable)`
-  pair and that `sample` round-trips an injected stimulus.
-- Provide a `wiredAnd(io1: I2cIo, io2: I2cIo, pullUp: Bool = True)`
-  Scala-side helper that stays in `src/sim/` (NOT in `src/hw/`).
-  It computes `bus = !(io1.writeEnable || io2.writeEnable)` for
-  each line and feeds it back to both `read` ports — this is the
-  shared model every later sim (bit controller, target,
-  loopback) re-uses to glue two `I2cIo` bundles together without
-  needing a dummy chip.
-- Cases: only-A drives low → bus low; only-B drives low → bus low;
-  both release → bus high; both drive low → bus low (no
-  contention reported, that's the wired-AND rule).
-
-**Makefile:** `sim-i2cio` target; add to `sim` aggregate and
-`.PHONY`.
+**Makefile:** `sim-i2cio` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 
@@ -286,7 +273,8 @@ val io = new Bundle {
   until reset is over so a fast producer doesn't slam in.
 
 **Sim hints (`src/sim/I2cBitControllerSim.scala`):**
-- Use the `wiredAnd` helper from Step 2 to glue the controller's
+- Use the `I2cIoBus` Component from `src/sim/` (Step 2) to glue the
+  controller's
   `I2cIo` to a Scala-side passive observer that records edges.
 - For each command, assert the recorded edge sequence matches a
   golden trace (cycle counts equal to `BusTiming` values, ±0).
@@ -591,7 +579,7 @@ val io = new Bundle {
 
 **Sim hints (`src/sim/I2cTargetFsmSim.scala`):**
 - **Composition test:** instantiate Phase 1's `I2cController` and
-  this `I2cTargetFsm` on the same `wiredAnd` bus. Drive
+  this `I2cTargetFsm` on a shared `I2cIoBus`. Drive
   controller commands from one fork and `txByte` from another;
   assert payload integrity and ACK polarity.
 - Stretch test: hold `txByte.valid = false` for N cycles after
@@ -669,7 +657,7 @@ led[0..2]   -> output (target matched, last-write-byte LSB, error)
 - **Single shared bus.** Both `I2cController.io.bus` and
   `I2cTarget.io.bus` attach to the same iCE40 `inout` pin.
   Because both speak `I2cIo`, the wired-AND happens correctly
-  in silicon via the external pull-ups; no `wiredAnd` Scala
+  in silicon via the external pull-ups; no `I2cIoBus` Scala
   helper involved.
 - **Tiny memory behind the target.** 16-byte register file
   driven by `I2cTarget.rx` / `tx`. The controller writes a

@@ -4,9 +4,9 @@ A from-scratch I²C **controller** and **target** in SpinalHDL, targeting
 the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
-Status: **Phase 0 in progress** — `I2cConfig` has landed; `I2cIo`
-bundle and `BusTiming` helper are still to come. See `TODO.md` for
-the full bring-up plan.
+Status: **Phase 0 in progress** — `I2cConfig` and `I2cIo` have
+landed; `BusTiming` helper is still to come. See `TODO.md` for the
+full bring-up plan.
 
 ## What's in scope
 
@@ -16,8 +16,10 @@ the full bring-up plan.
 - 7-bit addressing, selected via the `AddrMode` enum. (10-bit is a
   stretch goal — the addressing state in the FSM is the only piece
   that needs to know, and the enum is already plumbed through.)
-- Open-drain `TriState` SCL/SDA modelled correctly (drive low or
-  release; never drive high).
+- Open-drain SCL/SDA modelled with Spinal's `ReadableOpenDrain`
+  primitive — `write := False` pulls the line low, `write := True`
+  releases it. No `writeEnable`, no way to accidentally drive a
+  hard `1`.
 - Clock stretching — both as a controller (sample SCL, wait if
   the target holds it low) and as a target (pull SCL low to give
   the firmware time to react).
@@ -60,10 +62,10 @@ make flash     # program the iCEbreaker
 
 ## Hardware notes
 
-- I²C is open-drain. The iCE40 doesn't have true open-drain output
-  drivers; we model it with `TriState`: drive `0` to pull the line
-  low, set `oe=0` to release. External pull-ups (4.7 kΩ to 3.3 V on
-  the PMOD) do the rest.
+- I²C is open-drain. We model each line with Spinal's
+  `ReadableOpenDrain[Bool]`: `write := False` pulls the line low,
+  `write := True` releases it (high-Z; the external pull-up wins).
+  External 4.7 kΩ pull-ups to 3.3 V on the PMOD do the rest.
 - PMOD1A pinout used here (see `icebreaker.pcf`):
   - PMOD1A.1 (FPGA pin 4) → SCL
   - PMOD1A.2 (FPGA pin 2) → SDA
