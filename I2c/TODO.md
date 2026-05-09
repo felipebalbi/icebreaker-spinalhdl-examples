@@ -65,49 +65,631 @@ Component (`BusTiming` or `I2cBitController`).
 ---
 
 ## 🔲 Phase 0 — Foundations (remaining)
-- [ ] `I2cIo` bundle: `TriState` SCL + `TriState` SDA
-  (drive-low / release-high-Z; never drive high)
-- [ ] `BusTiming` helper — consume `I2cConfig.quarterPeriodCycles`
-  and fan it out into `tHigh`, `tLow`, `tHd_sta`, `tSu_sto`, `tBuf`
-  cycle counts. Should be a pure elaboration-time calculation (just
-  like the UART's BaudGenerator increment).
+
+### 🔲 Step 2 — `I2cIo`
+
+**Goal:** model the wired-AND, open-drain SCL+SDA pair as a single
+reusable `Bundle` so every block downstream — controller, target,
+demos, sim glue — talks to the bus the same way and can't
+accidentally drive a hard `1`.
+
+**File:** `src/hw/I2cIo.scala`
+
+**Suggested IO:**
+```scala
+// One open-drain wire. write is hard-wired to False; only writeEnable
+// is the real control. Helpers below keep callers from repeating the
+// boilerplate (and from forgetting and driving '1' by mistake).
+case class OpenDrainIo() extends Bundle with IMasterSlave {
+  val ctrl = TriState(Bool())              // ctrl.write, .writeEnable, .read
+  def driveLow(): Unit = {                 // pull line to 0
+    ctrl.write       := False
+    ctrl.writeEnable := True
+  }
+  def release(): Unit = {                  // high-Z; pull-up takes over
+    ctrl.write       := False
+    ctrl.writeEnable := False
+  }
+  def sample: Bool = ctrl.read             // what the bus actually shows
+  override def asMaster(): Unit = master(ctrl)
+}
+
+case class I2cIo() extends Bundle with IMasterSlave {
+  val scl = OpenDrainIo()
+  val sda = OpenDrainIo()
+  override def asMaster(): Unit = { master(scl); master(sda) }
+}
+```
+
+**Design notes:**
+- **Never drive 1.** I²C is wired-AND with an external pull-up; two
+  devices driving against each other = short. `OpenDrainIo.driveLow`
+  / `release` is the only API; `write` is forced to `False` at the
+  bundle boundary so synthesis can never select the high-drive path.
+- **Read is always live.** `sample` is the post-pad value of the
+  bus, including whatever any other device is doing. The
+  bit-controller uses it both for read-bit slots and for
+  arbitration detection (writing `1` means releasing — if the line
+  still reads `0`, someone else is pulling it).
+- **`IMasterSlave`** so `master(I2cIo())` on the controller side
+  meshes with `slave(I2cIo())` on the target side without manual
+  port direction juggling.
+- Top-level pin attachment goes through `inout` in the generated
+  Verilog, which maps to an iCE40 `SB_IO` configured as
+  bidirectional with no internal pull-up — the external 4.7 kΩ
+  pull-ups on the PMOD do the real work.
+- Reset semantics: at reset, `writeEnable := False` so the bus
+  floats high before the FSMs come up. Use `Reg(...) init(False)`
+  inside the bit-controller, not here — `I2cIo` is wires only.
+
+**Sim hints (`src/sim/I2cIoSim.scala`):**
+- Most of this block is wires; the sim is mostly a smoke test that
+  `driveLow` / `release` produce the right `(write, writeEnable)`
+  pair and that `sample` round-trips an injected stimulus.
+- Provide a `wiredAnd(io1: I2cIo, io2: I2cIo, pullUp: Bool = True)`
+  Scala-side helper that stays in `src/sim/` (NOT in `src/hw/`).
+  It computes `bus = !(io1.writeEnable || io2.writeEnable)` for
+  each line and feeds it back to both `read` ports — this is the
+  shared model every later sim (bit controller, target,
+  loopback) re-uses to glue two `I2cIo` bundles together without
+  needing a dummy chip.
+- Cases: only-A drives low → bus low; only-B drives low → bus low;
+  both release → bus high; both drive low → bus low (no
+  contention reported, that's the wired-AND rule).
+
+**Makefile:** `sim-i2cio` target; add to `sim` aggregate and
+`.PHONY`.
+
+---
+
+### 🔲 Step 3 — `BusTiming`
+
+**Goal:** turn `I2cConfig` into a named table of cycle counts the
+bit / byte controllers can read by symbol (`tHigh`, `tLow`, …)
+instead of re-deriving timing from `clkFreqHz` at every site. Pure
+elaboration-time math — no `Component`.
+
+**File:** `src/hw/BusTiming.scala`
+
+**Suggested IO:** none — it's a `case class` consumed by value,
+the same way `I2cConfig` is.
+
+```scala
+// All values are integer system-clock cycle counts, rounded up so the
+// hardware never undershoots the spec. Symbol names match the I²C
+// spec table verbatim so cross-referencing the datasheet is trivial.
+case class BusTiming(cfg: I2cConfig) {
+  // Bit-period halves
+  val tHigh:  Int = ???   // SCL high time           (>= spec tHIGH)
+  val tLow:   Int = ???   // SCL low time            (>= spec tLOW)
+  // Start / stop framing
+  val tHdSta: Int = ???   // hold time after START   (>= spec tHD;STA)
+  val tSuSto: Int = ???   // setup time before STOP  (>= spec tSU;STO)
+  val tBuf:   Int = ???   // bus-free between txns   (>= spec tBUF)
+  // Data slot
+  val tSuDat: Int = ???   // SDA setup before SCL↑   (>= spec tSU;DAT)
+  val tHdDat: Int = ???   // SDA hold after SCL↓     (>= spec tHD;DAT)
+}
+```
+
+**Design notes:**
+- **Round up, never down.** Use `(num + den - 1) / den` for every
+  derivation: spec values are minimums, and rounding down would
+  silently produce an under-spec waveform that "works" on a slow
+  target but breaks on a strict one. The error case from
+  `I2cConfig.quarterPeriodCycles >= 1` should be the only path
+  that fails elaboration.
+- **Source of truth.** `quarterPeriodCycles` already lives on
+  `I2cConfig` and stays there (callers may still want it for
+  symmetric mid-phase sampling). Everything else lives here, so
+  there is exactly one place to look up "how many cycles is
+  tHIGH".
+- **Spec table (Standard mode @ 100 kHz):**
+
+  | Symbol  | Min     | Cycles @ 12 MHz |
+  |---------|---------|-----------------|
+  | tHIGH   | 4.0 µs  | 48              |
+  | tLOW    | 4.7 µs  | 57              |
+  | tHD;STA | 4.0 µs  | 48              |
+  | tSU;STO | 4.0 µs  | 48              |
+  | tBUF    | 4.7 µs  | 57              |
+  | tSU;DAT | 0.25 µs | 3               |
+  | tHD;DAT | 0 µs    | 0 (≥0 is fine)  |
+
+  Encode the per-`BusSpeed` minimums as a private lookup table
+  inside `BusTiming` (a `BusSpeed.E => SpeedMins` map or a `match`)
+  — same single-source-of-truth pattern `I2cConfig.busFreqHz`
+  already uses.
+- **No runtime knobs.** Everything is `val`s computed from `cfg`,
+  so the synthesised design carries plain integer constants. If a
+  caller wants to tweak `tHigh` per-instance, they should build a
+  new `I2cConfig`, not poke `BusTiming`.
+- **`tHdDat = 0` is legal** by the spec. Make sure the bit
+  controller treats `0` as "no extra hold cycles" without
+  off-by-one weirdness.
+
+**Sim hints (`src/sim/BusTimingSim.scala`):**
+- No clock to drive — this is a pure-Scala test. Use a plain
+  `object BusTimingSim { def main(...) }` like
+  `BaudGeneratorSim`, but skip `SimConfig.compile`.
+- Iterate over every `BusSpeed` × a few `clkFreqHz`
+  (12 MHz, 25 MHz, 48 MHz). Print the resulting table.
+- Assert the 12 MHz / Standard row matches the table above —
+  that's the regression net for the rounding rule.
+- Assert that for every row, `tHigh + tLow >= clkFreqHz /
+  busFreqHz` (the bit period must cover one full SCL period).
+- Negative test: `I2cConfig(clkFreqHz = 1000, busSpeed =
+  FastPlus)` must throw at construction (already enforced by
+  `I2cConfig`'s `require`, but pin it down here so we notice if
+  the guard is ever weakened).
+
+**Makefile:** `sim-bustiming` target; add to `sim` aggregate and
+`.PHONY`.
+
+---
 
 ## 🔲 Phase 1 — Controller (host)
-- [ ] `I2cBitController` — drives one bit at a time given a
-  command word (`{idle, start, stop, write_bit, read_bit,
-  rep_start}`). Owns the bit-level timing and produces "bit
-  done" / "arbitration lost" status. Sim it first, byte-level
-  FSM later.
-- [ ] `I2cByteController` — turns byte-level transactions
-  (address+R/W, write byte, read byte+ACK) into bit-controller
-  commands. Handles the ACK slot. Sim against a behavioural
-  target model.
-- [ ] `I2cController` — Stream-fed wrapper: producer pushes
-  command words (start, write byte, read with ack/nack, stop),
-  consumer reads back data bytes + status flags. Mirrors the
-  shape of `UartTx`/`UartRx`.
-- [ ] `I2cControllerSim` — sweep matrix: 7-bit write,
-  7-bit read, write-then-read with repeated-START, ack-poll
-  loop, NACK on address.
-- [ ] Bring-up demo: read MCP9808 temperature register (or
-  SSD1306 init sequence) on PMOD1A, dump bytes over the
-  existing `UartTx` for visibility.
+
+### 🔲 Step 4 — `I2cBitController`
+
+**Goal:** own SCL toggling and one-bit-at-a-time bus operations.
+Given a command word, drive the right (SCL, SDA) edges with the
+right `BusTiming` cycle counts, then assert `done`. This is the
+only block that touches `I2cIo` directly; everything above it
+speaks bytes.
+
+**File:** `src/hw/I2cBitController.scala`
+
+**Suggested IO:**
+```scala
+object BitCmd extends SpinalEnum {
+  val Idle, Start, RepStart, Stop, WriteBit, ReadBit = newElement()
+}
+
+val io = new Bundle {
+  val cmd     = slave Stream BitCmd()        // one command per transaction
+  val txBit   = in  Bool()                   // value to drive on WriteBit
+  val rxBit   = out Bool()                   // last sampled SDA on ReadBit
+  val arbLost = out Bool()                   // we wrote 1 but bus stayed 0
+  val bus     = master(I2cIo())              // open-drain SCL/SDA
+}
+```
+
+**Design notes:**
+- **State machine, not a counter soup.** Use `spinal.lib.fsm` with
+  states `{ Idle, Setup, ScLLow, ScLRise, ScLHigh, ScLFall,
+  Hold }` (or similar). Each transition is gated by a single
+  shared `phaseCounter` that loads from `BusTiming` on entry.
+- **Quarter-period scheduling.** The natural phase structure is
+  four quarter-bit slots: drop SCL → set SDA → raise SCL →
+  sample/drive bit. Reuse `cfg.quarterPeriodCycles` as the
+  baseline; per-edge stretching (`tHdSta`, `tSuSto`, `tBuf`)
+  loads a different value.
+- **Clock stretching path** (only when `cfg.useClockStretching`):
+  after we release SCL high, do not start counting `tHigh` until
+  `bus.scl.sample === True`. Wrap this in a cfg-gated branch so
+  the wait state synthesises away when stretching is disabled.
+  Leave a `TODO` for a future stretch-timeout register; do **not**
+  build it in this step.
+- **Arbitration detection.** During `WriteBit` of a `1`, sample
+  SDA in the high phase. If `bus.sda.sample === False`, someone
+  else is pulling — set `arbLost`, abort the transaction, return
+  to `Idle` with the bus released.
+- **`Start` from `Idle`:** SDA falls while SCL is high. From a
+  released bus, this is `release SDA → release SCL → drive SDA
+  low → drive SCL low after tHdSta`. `RepStart` does the same
+  starting from "SCL just went low after a previous bit".
+- **`Stop`:** SCL low → SDA low → SCL high → SDA high after
+  tSuSto. After Stop, enforce `tBuf` of bus-free time before we
+  accept the next `cmd`.
+- **Reset:** both lines released, FSM in `Idle`. `cmd.ready` low
+  until reset is over so a fast producer doesn't slam in.
+
+**Sim hints (`src/sim/I2cBitControllerSim.scala`):**
+- Use the `wiredAnd` helper from Step 2 to glue the controller's
+  `I2cIo` to a Scala-side passive observer that records edges.
+- For each command, assert the recorded edge sequence matches a
+  golden trace (cycle counts equal to `BusTiming` values, ±0).
+- Arbitration test: schedule a `WriteBit(1)` and have the sim
+  helper drive SDA low during the high phase; assert `arbLost`
+  rises and the FSM returns to `Idle` within one bit.
+- Stretch test (only when `useClockStretching = true`): hold SCL
+  low for N cycles after the controller releases it; assert the
+  high phase is `N + tHigh` cycles long, not `tHigh`.
+- Smoke test: a sequence `Start → WriteBit×8 → ReadBit → Stop`
+  produces no protocol violations on the recorded trace.
+
+**Makefile:** `sim-bitctrl` target; add to `sim` aggregate.
+
+---
+
+### 🔲 Step 5 — `I2cByteController`
+
+**Goal:** lift the bit-level FSM to byte-level transactions —
+address + R/W̅, payload bytes, and the all-important ACK slot —
+so callers above this layer never have to think about
+`BitCmd.WriteBit` again.
+
+**File:** `src/hw/I2cByteController.scala`
+
+**Suggested IO:**
+```scala
+object ByteCmdKind extends SpinalEnum {
+  val AddrWrite, AddrRead, WriteData, ReadData, RepStart, Stop = newElement()
+}
+
+case class ByteCmd() extends Bundle {
+  val kind   = ByteCmdKind()
+  val data   = Bits(8 bits)   // address (with R/W̅) or write payload
+  val ackOut = Bool()         // for ReadData: ack=0 to continue, 1 to NACK
+}
+
+case class ByteRsp() extends Bundle {
+  val data    = Bits(8 bits) // bytes read back
+  val ackIn   = Bool()        // ACK reported by the target (0 = ack)
+  val arbLost = Bool()
+}
+
+val io = new Bundle {
+  val cmd = slave  Stream ByteCmd()
+  val rsp = master Stream ByteRsp()
+  val bus = master(I2cIo())
+}
+```
+
+**Design notes:**
+- **One `cmd.fire` = one bit-level transaction.** The byte FSM
+  drives the bit FSM eight times per data byte plus once for the
+  ACK slot. The ACK slot is a `ReadBit` from the target's POV
+  during writes (we listen) and a `WriteBit` of the master ACK
+  bit during reads.
+- **Address byte** = `{ addr[6:0], rw }`. For `AddrWrite`, R/W̅
+  = 0; for `AddrRead`, R/W̅ = 1. The byte controller does not
+  bake in the addressing mode — `cfg.addrMode` decides whether
+  it's one address byte or the 10-bit escape sequence (latter
+  is plumbed through but only `SevenBits` is exercised in
+  Step 5).
+- **Stream contracts.** Each `cmd.fire` produces exactly one
+  `rsp.fire` for `AddrWrite` / `AddrRead` / `WriteData` /
+  `ReadData`. `RepStart` and `Stop` fire `rsp` with `ackIn` /
+  `data` set to "don't care" so the upper layer can rely on a
+  1:1 handshake.
+- **Error propagation.** If the bit-controller raises `arbLost`
+  mid-byte, complete the current `rsp` with `arbLost = True`,
+  release the bus, and stay quiescent until the producer drains
+  / restarts.
+
+**Sim hints (`src/sim/I2cByteControllerSim.scala`):**
+- Build a Scala-side **behavioural target** (`BehaviouralTargetMock`)
+  that lives in `src/sim/`: it watches the wired-AND bus, decodes
+  START / STOP / address / R/W̅, ACKs at a configured slave
+  address, and serves a small register file. Reuse it in Steps
+  6, 7, 9, 10.
+- Cases:
+  - `AddrWrite(0x50) → WriteData(0xAB) → Stop` against a target
+    that ACKs both bytes; assert mock register file received
+    `0xAB`.
+  - `AddrWrite(0x50) → WriteData(reg) → RepStart →
+    AddrRead(0x50) → ReadData(ack=continue) →
+    ReadData(ack=nack) → Stop` round-trip against a 2-byte
+    register; assert the bytes match.
+  - NACK on address: the mock answers a wrong address; assert
+    `rsp.ackIn = 1` and the FSM stops cleanly.
+  - Mid-byte arbitration loss: assert `rsp.arbLost = 1` once and
+    only once.
+
+**Makefile:** `sim-bytectrl` target.
+
+---
+
+### 🔲 Step 6 — `I2cController`
+
+**Goal:** the public top-level Stream-fed controller. Mirrors the
+shape of `UartTx` / `UartRx` so anyone who has wired up the UART
+project can wire this one up by analogy.
+
+**File:** `src/hw/I2cController.scala`
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val cmd = slave  Stream ByteCmd()  // identical to byte-controller cmd
+  val rsp = master Stream ByteRsp()
+  val bus = master(I2cIo())
+}
+```
+
+**Design notes:**
+- **Thin wrapper.** This block exists to be the place demos
+  instantiate. It owns a `BusTiming(cfg)`, an `I2cByteController`
+  and (when `useClockStretching`) a CDC-friendly synchroniser on
+  `bus.scl.sample`. No new state machine of its own.
+- **Pin out `I2cIo`.** Demo tops directly attach
+  `io.bus.scl.ctrl.{write, writeEnable, read}` and
+  `io.bus.sda.ctrl.{...}` to the iCE40 `inout` pins. This is the
+  one and only place in the project where bus naming matters for
+  external Verilog interop.
+- No clock domain crossings inside this block beyond the SCL
+  synchroniser; producer/consumer FIFOs (if any) live in the
+  demo, like the Uart project does for `UartTxDemo`.
+
+**Sim hints (`src/sim/I2cControllerSim.scala`):**
+- Sweep matrix using the `BehaviouralTargetMock`:
+  - 7-bit write of N bytes;
+  - 7-bit read of N bytes;
+  - write-then-read with `RepStart`;
+  - ack-poll loop (repeated `AddrWrite` until ACK, modelling the
+    EEPROM-write-cycle wait pattern);
+  - NACK on address.
+- Assert `rsp` order and flag bits match the producer's
+  expectations on a per-transaction basis.
+
+**Makefile:** `sim-controller` target.
+
+---
+
+### 🔲 Step 7 — Controller bring-up demo
+
+**Goal:** prove the full controller stack works on real silicon
+by reading a known-quantity sensor and dumping its register data
+over UART so we can eyeball it on a desktop terminal — same
+"`Hello, World`" gating gesture the Uart project used.
+
+**File:** `src/hw/I2cControllerDemo.scala` plus
+`src/hw/I2cControllerDemoVerilog.scala` for the elaboration
+entrypoint.
+
+**Suggested IO (top-level pins):**
+```
+clk_12      -> input
+rst_n       -> input (active-low button)
+i2c_scl     -> inout  (PMOD1A pin 1)
+i2c_sda     -> inout  (PMOD1A pin 2)
+uart_tx     -> output (USB-UART TXD on the iCEbreaker)
+```
+
+**Design notes:**
+- **Pick one target part.** Recommend MCP9808 (temperature
+  sensor) over SSD1306: MCP9808 has a tiny driver footprint
+  (one register read returns the temperature), SSD1306 needs an
+  init blob and DC-DC startup delays. Document the choice in
+  this block's header comment.
+- **No external `Uart` project dependency.** Copy the minimal TX
+  path (`BaudGenerator`, `TxShiftReg`, `TxFsm`, `UartTx`) into
+  the `i2c` package as `LocalUartTx*` — or, cleaner, factor the
+  TX out into a shared `common` package later. For Step 7,
+  inline-copy with an "imported from Uart project, sync forward
+  if Uart changes" comment header. Keeps the I2c project
+  buildable with `sbt` in isolation.
+- **Driver shape.** A small ROM of `ByteCmd` words feeds
+  `I2cController.io.cmd`; `io.rsp.data` bytes go to a
+  byte-to-hex-ASCII converter and out the UART. Reuse the
+  Uart project's "drain a ROM through a Stream" pattern.
+- **Reset:** debounced active-low button; after reset, kick off
+  one MCP9808 read every ~500 ms (a counter reset, not a fancy
+  RTC).
+
+**Sim hints:**
+- No new SpinalSim — this is hardware bring-up. Optional
+  end-to-end sim that wires `BehaviouralTargetMock(0x18,
+  registers = Map(0x05 -> 0x0123))` to the controller and
+  scrapes the UART output for "T=0x0123" is nice-to-have but
+  not required to ship.
+
+**Makefile:** add `TOP := I2cControllerDemo` once this step
+lands (the placeholder is already there); the bitstream then
+flows through `make` / `make flash` like the Uart demo did.
+No new sim target.
+
+**Hardware bring-up checklist** (mirror the Uart Step 5b style):
+- [ ] Bitstream builds clean.
+- [ ] On scope/LA: SCL toggles at the configured `busFreqHz`.
+- [ ] Address phase ACKs at `0x18`.
+- [ ] Temperature register read returns plausible data.
+- [ ] UART output decodes on `picocom`.
+
+---
 
 ## 🔲 Phase 2 — Target (peripheral)
-- [ ] `I2cTargetMonitor` — passive START/STOP/bit-edge detector.
-  Pure observer first; lets us validate the rest of the target
-  state without needing to drive anything. Sim against the
-  bit-controller's bus traffic.
-- [ ] `I2cTargetFsm` — drives SDA for ACK + read-data slots,
-  optionally pulls SCL low for clock stretching. Sim against
-  the controller from Phase 1.
-- [ ] `I2cTarget` — Stream wrapper presenting "address matched,
-  here's the byte the controller sent" / "controller wants a
-  byte from us, supply it via Stream" handshakes.
-- [ ] Loopback demo: `I2cController` ↔ `I2cTarget` on the same
-  PMOD pair, with the target acting as a tiny memory the
-  controller writes/reads. Verifies the whole stack on real
-  silicon without depending on any external chip.
+
+### 🔲 Step 8 — `I2cTargetMonitor`
+
+**Goal:** a *passive* bus observer that detects START / repeated
+START / STOP and per-bit edges from the wired-AND lines without
+ever driving anything. Building block for the target FSM and
+also a sim assertion engine for Phase 1.
+
+**File:** `src/hw/I2cTargetMonitor.scala`
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val bus      = slave(I2cIo())          // read-only attachment
+  val start    = out Bool()              // 1-cycle pulse
+  val repStart = out Bool()              // 1-cycle pulse
+  val stop     = out Bool()              // 1-cycle pulse
+  val sclRise  = out Bool()              // 1-cycle pulse
+  val sclFall  = out Bool()              // 1-cycle pulse
+  val sdaSamp  = out Bool()              // SDA value on last sclRise
+}
+```
+
+**Design notes:**
+- **All inputs synchronised first.** Even though the controller
+  drives both lines, the target side may live in a different
+  electrical clock domain after debounce/glitch filtering. Run
+  both `bus.scl.sample` and `bus.sda.sample` through a 2-FF
+  synchroniser (steal `RxSync` shape from the Uart project)
+  before edge detection.
+- **Edge definitions:**
+  - `start`    : SDA falls while SCL is high, from idle (after
+    `tBuf` of bus-free observation, optional).
+  - `repStart` : SDA falls while SCL is high, *not* from idle.
+  - `stop`     : SDA rises while SCL is high.
+  - `sclRise` / `sclFall` : registered edge of the synchronised
+    SCL.
+- **Pure observer.** No `writeEnable` ever asserted; this block
+  must be safe to instantiate alongside any number of other bus
+  drivers.
+- **No spec-timing dependence.** `tBuf` etc. are nice for
+  glitch filtering but optional; first cut should detect
+  edges by combinational logic on registered samples and
+  leave timing-aware filtering as a future hardening pass.
+
+**Sim hints (`src/sim/I2cTargetMonitorSim.scala`):**
+- Replay traces produced by Step 4's `I2cBitControllerSim`
+  (i.e. drive the bus from a Scala harness) and assert
+  `start` / `repStart` / `stop` / `sclRise` / `sclFall` fire
+  at the expected cycles.
+- Adversarial trace: SDA glitches during SCL low must NOT
+  produce START (the synchroniser filter handles single-cycle
+  glitches; multi-cycle glitches are a known limitation —
+  document, don't fix).
+
+**Makefile:** `sim-tgtmon` target.
+
+---
+
+### 🔲 Step 9 — `I2cTargetFsm`
+
+**Goal:** drive SDA during the ACK slot and during read-data
+slots; optionally pull SCL low to stretch when the upper layer
+isn't ready with a byte to serve. First block on the target
+side that actually drives the bus.
+
+**File:** `src/hw/I2cTargetFsm.scala`
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val bus       = slave(I2cIo())
+  // Upstream (the future I2cTarget wrapper) handshake:
+  val addrMatch = in  Bool()           // upper layer answers per START
+  val rxByte    = master Flow Bits(8 bits)  // bytes received from controller
+  val txByte    = slave  Stream Bits(8 bits) // bytes we hand back on read
+  // Optional: tell the FSM whether the controller is reading or writing
+  val isRead    = in  Bool()
+}
+```
+
+**Design notes:**
+- **Composes `I2cTargetMonitor`.** This block does not duplicate
+  edge detection; it instantiates the monitor and reacts to its
+  pulses.
+- **ACK slot rule.** During the 9th bit of every byte sent *to*
+  us, drive SDA low (ACK) if `addrMatch` (or a per-byte
+  flow-control bit) is set; release otherwise (NACK).
+- **Read slots.** Shift `txByte.payload` out MSB-first onto SDA,
+  one bit per `sclFall → sclRise` window. Pop `txByte` when the
+  byte is fully clocked out and the controller responded with
+  ACK; on NACK, return to address-wait.
+- **Clock stretching (`cfg.useClockStretching`).** When the FSM
+  needs more time — e.g. `txByte.valid = false` at the start of
+  a new read byte — drive SCL low. Release once `txByte` is
+  presented. Same `cfg`-gated synthesis-elision as Step 4.
+- **Reset:** bus released, FSM idle, no in-flight `txByte`.
+
+**Sim hints (`src/sim/I2cTargetFsmSim.scala`):**
+- **Composition test:** instantiate Phase 1's `I2cController` and
+  this `I2cTargetFsm` on the same `wiredAnd` bus. Drive
+  controller commands from one fork and `txByte` from another;
+  assert payload integrity and ACK polarity.
+- Stretch test: hold `txByte.valid = false` for N cycles after
+  `addrMatch`; assert SCL stays low for N cycles, then ticks
+  resume cleanly.
+
+**Makefile:** `sim-tgtfsm` target.
+
+---
+
+### 🔲 Step 10 — `I2cTarget`
+
+**Goal:** the public Stream-shaped target wrapper. Presents
+"address matched, here's the byte the controller sent" / "we
+need a byte to send back" handshakes and hides the FSM
+plumbing.
+
+**File:** `src/hw/I2cTarget.scala`
+
+**Suggested IO:**
+```scala
+val io = new Bundle {
+  val bus     = slave(I2cIo())
+  val rx      = master Stream Bits(8 bits)   // bytes the controller wrote to us
+  val tx      = slave  Stream Bits(8 bits)   // bytes we'll return on read
+  val matched = out   Bool()                 // pulses on every address match
+}
+```
+
+**Design notes:**
+- **Match against `cfg.slaveAddress`.** That field doesn't exist
+  in `I2cConfig` yet — adding it is part of this step. Default
+  to `0x50` (a typical EEPROM address) and document that.
+- **Wraps `I2cTargetFsm`.** Wires `rx` / `tx` Streams to the FSM's
+  `rxByte` / `txByte`; converts `addrMatch` into the
+  `matched` pulse for upstream observability.
+- **Backpressure:** if `rx` consumer is slow, the FSM's
+  next-byte ACK is gated on `rx.ready`. With clock stretching
+  off, this means an overrun NACK; with stretching on, the FSM
+  pulls SCL low until `rx.ready`.
+
+**Sim hints (`src/sim/I2cTargetSim.scala`):**
+- Behavioural test using a tiny in-memory register file behind
+  `rx` / `tx`. Drive Phase-1 controller through a sequence of
+  writes and reads at multiple addresses (matched and
+  unmatched); assert register file contents and read-back data.
+- Address-mismatch case: NACK on address, no pulses on
+  `matched`.
+
+**Makefile:** `sim-target` target.
+
+---
+
+### 🔲 Step 11 — Loopback demo
+
+**Goal:** end-to-end hardware bring-up of the target half. Run
+the controller and target on the same iCEbreaker, talking to
+each other on the same PMOD pair. Verifies the full stack
+without depending on any external chip.
+
+**File:** `src/hw/I2cLoopbackDemo.scala` plus
+`src/hw/I2cLoopbackDemoVerilog.scala`.
+
+**Suggested IO (top-level pins):**
+```
+clk_12      -> input
+rst_n       -> input
+i2c_scl     -> inout (single PMOD pin shared by both halves)
+i2c_sda     -> inout (single PMOD pin shared by both halves)
+uart_tx     -> output (status messages)
+led[0..2]   -> output (target matched, last-write-byte LSB, error)
+```
+
+**Design notes:**
+- **Single shared bus.** Both `I2cController.io.bus` and
+  `I2cTarget.io.bus` attach to the same iCE40 `inout` pin.
+  Because both speak `I2cIo`, the wired-AND happens correctly
+  in silicon via the external pull-ups; no `wiredAnd` Scala
+  helper involved.
+- **Tiny memory behind the target.** 16-byte register file
+  driven by `I2cTarget.rx` / `tx`. The controller writes a
+  pattern, then reads it back; LEDs / UART report PASS / FAIL.
+- **No new sim.** All sim coverage already lives in earlier
+  steps; this is hardware verification only. Optional smoke sim
+  is fine but should not block.
+
+**Hardware bring-up checklist:**
+- [ ] Bitstream builds.
+- [ ] Pattern `0..15` round-trips through the register file.
+- [ ] Logic-analyser capture shows correct ACK timing on every
+      byte.
+- [ ] `picocom` shows the PASS message after each round-trip.
+
+**Makefile:** add a second `TOP_LOOPBACK := I2cLoopbackDemo`
++ `flash-loopback` target so the two demos can coexist; or
+swap `TOP` between builds. Pick whichever style stays
+closest to the Uart project's `UartTxDemo` / `UartEchoDemo`
+pair.
 
 ## 🔲 Phase 3 — Stretch goals (no commitment)
 - [ ] 10-bit addressing.
