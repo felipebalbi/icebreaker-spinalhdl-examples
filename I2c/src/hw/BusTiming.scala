@@ -23,27 +23,44 @@ package i2c
   *
   *   - `tHighMin` / `tLowMin` are the spec floor in cycles, rounded up
   *     from the I²C-Bus Specification table.
-  *   - `tHigh` / `tLow` are the *scheduled* SCL phase widths, computed
-  *     as `max(2 × quarterPeriodCycles, tXxxMin)`. The natural
-  *     quarter-period schedule is used whenever it already clears the
-  *     spec; otherwise the violating phase is stretched to the floor.
-  *     This matters in practice because Fast-mode demands
-  *     `tLow ≥ 1.3 µs` while half the bit period at 400 kHz is only
-  *     1.25 µs — a strict 50/50 schedule would make the spec
-  *     unreachable at *any* system clock. Stretching `tLow` (and
-  *     therefore the bit period) is the standard fix; the resulting
-  *     SCL frequency drops below `busFreqHz` when this happens, which
-  *     the spec also explicitly allows.
+  *   - `tHigh` is the *scheduled* SCL high-phase width, computed as
+  *     `max(2 × quarterPeriodCycles, tHighMin)`. It stays a clean
+  *     multiple of `quarterPeriodCycles` whenever the spec floor
+  *     allows, so the bit-controller can sample mid-`tHigh` from a
+  *     simple quarter-period counter.
+  *   - `tLow` is the scheduled SCL low-phase width. It starts at
+  *     `max(2 × quarterPeriodCycles, tLowMin)` and is then stretched
+  *     by a `shortfall` term so that
+  *     `tHigh + tLow ≥ ceil(clkFreqHz / busFreqHz)` cycles. This
+  *     recovers an exact SCL frequency for clock/bus ratios that
+  *     don't divide cleanly — e.g., 25 MHz at Fast+ floors to
+  *     `qpc = 6 → 4×qpc = 24` cycles, but the ideal bit period is
+  *     `25` cycles, so `tLow` is bumped by `1` to land on 1 MHz
+  *     exactly. Putting the shortfall into `tLow` rather than
+  *     `tHigh` keeps the high-phase sampling grid simple and
+  *     matches what most I²C controllers do (longer `tLow` is the
+  *     I²C clock-stretching idiom that the protocol explicitly
+  *     allows).
   *
-  * The achieved SCL frequency is `clkFreqHz / (tHigh + tLow)` and
-  * sits at-or-below `busFreqHz` for every supported config — `qpc`
-  * is rounded *up* in `I2cConfig` to guarantee the period covers at
-  * least `clkFreqHz / busFreqHz` cycles, and the `max(...)` above
-  * only ever extends it further.
+  * Two cases where this still leaves a residual deviation from
+  * the headline grade rate:
+  *
+  *   - **Fast mode below 12 MHz integer multiples** (e.g., 25 MHz,
+  *     48 MHz). `tLowMin = 1.3 µs` is already wider than half the
+  *     400 kHz bit period, so `tLow` is determined by the spec
+  *     floor and the shortfall has no room to pull the period up
+  *     to the ideal. Achieved SCL sits a few percent below
+  *     400 kHz; this is well inside any I²C target's tolerance
+  *     and is the same behaviour every general-purpose I²C
+  *     controller exhibits at these clocks.
+  *   - **Strict 50/50 SCL is mathematically unreachable in Fast
+  *     mode** at any clock for the same reason; the period is
+  *     skewed towards a longer `tLow`. The protocol allows it.
   *
   * `tHigh + tLow ≥ 4 × quarterPeriodCycles` is therefore a one-way
-  * invariant — equality holds only when both spec floors fit inside
-  * the natural quarter-period grid.
+  * invariant — equality holds only when both spec floors fit
+  * inside the natural quarter-period grid *and* the clock divides
+  * cleanly into the bus rate.
   *
   * Framing parameters (`tHdSta`, `tSuSta`, `tSuSto`, `tBuf`) and the
   * data-slot parameters (`tSuDat`, `tHdDat`) do not live on the
@@ -115,8 +132,32 @@ case class BusTiming(cfg: I2cConfig) {
     */
   val tHigh: Int = math.max(2 * cfg.quarterPeriodCycles, tHighMin)
 
-  /** Scheduled SCL low-phase width, in system-clock cycles. See [[tHigh]]. */
-  val tLow: Int = math.max(2 * cfg.quarterPeriodCycles, tLowMin)
+  /** Provisional SCL low-phase width before the shortfall stretch. */
+  private val tLow0: Int = math.max(2 * cfg.quarterPeriodCycles, tLowMin)
+
+  /** Cycles by which `tHigh + tLow0` falls short of one ideal bit
+    * period (`ceil(clkFreqHz / busFreqHz)`).
+    *
+    * For integer-clean clock/bus ratios this is `0`. For ratios that
+    * don't divide cleanly — and where the spec floors haven't already
+    * stretched the period past the ideal — this picks up the missing
+    * cycles so the achieved SCL frequency lands on `busFreqHz`
+    * exactly. Saturated at zero: when the spec floors *do* stretch
+    * the period (Fast mode is the canonical case), we honour the
+    * floor rather than try to claw the period back below it.
+    */
+  private val shortfall: Int = math.max(
+    0,
+    divRoundUp(cfg.clkFreqHz.toLong, cfg.busFreqHz.toLong).toInt - (tHigh + tLow0)
+  )
+
+  /** Scheduled SCL low-phase width, in system-clock cycles.
+    *
+    * Starts at `max(2 × quarterPeriodCycles, tLowMin)` and absorbs
+    * the [[shortfall]] so the achieved SCL frequency lands on
+    * `busFreqHz` exactly when the spec floors leave room.
+    */
+  val tLow: Int = tLow0 + shortfall
 
   // -------- START / STOP framing (FSM counts these out directly) ---
 

@@ -163,11 +163,15 @@ elaboration-time math — no `Component`.
   (`tSuDat`, `tHdDat`) values stay as straight round-ups from the
   spec minimum — they don't sit on the quarter-period grid.
 - `tSuSta` (setup-for-repeated-START) added — see "Divergence #3".
-- `I2cConfig.quarterPeriodCycles` switched from floor to round-up
-  (see "Divergence #4") so the achieved SCL frequency never
-  exceeds `busFreqHz`. A new `require(clkFreqHz >= busFreqHz * 4)`
-  preserves the "clock too slow for this bus" elaboration error
-  that the old `qpc >= 1` check used to provide.
+- `I2cConfig.quarterPeriodCycles` is `clkFreqHz / (busFreqHz * 4)`
+  (floor) — the natural quarter-period grid. A new
+  `require(clkFreqHz >= busFreqHz * 4)` provides the
+  "clock too slow for this bus" elaboration error.
+- `BusTiming.tLow` includes a `shortfall` stretch
+  (see "Divergence #4") that recovers an exact SCL frequency
+  for non-clean clock/bus ratios by dumping
+  `max(0, ceil(clkFreqHz / busFreqHz) - (tHigh + tLow0))`
+  cycles into the low phase.
 - Elaboration-time `assert`s pin the `tHigh ≥ tHighMin`,
   `tLow ≥ tLowMin`, and `tHigh + tLow ≥ 4 × quarterPeriodCycles`
   invariants for future readers.
@@ -201,19 +205,29 @@ elaboration-time math — no `Component`.
    `tHdSta` per the spec; the bit-controller (Step 4) needs it for
    repeated-START framing, and the spec table was already open in
    the file. Cheaper to add now than to revisit during Step 4.
-4. **`I2cConfig.quarterPeriodCycles` rounded *up*, not floored.**
-   The original `clkFreqHz / (busFreqHz * 4)` truncates: at 25 MHz
-   Standard mode it yields 62 instead of the ideal 62.5, giving
-   100.81 kHz on the bus instead of the requested 100 kHz —
-   nominally over-spec for a Standard-mode segment. Surfaced when
-   running `sim-bustiming` for the first time on a real toolchain.
-   Switched to ceil (`divRoundUp`) so the achieved SCL frequency
-   sits at-or-below `busFreqHz` for every (clk, busSpeed) pair.
-   Added `require(clkFreqHz >= busFreqHz * 4)` to preserve the
-   "clock too slow for this bus" elaboration error that the old
-   floor-based `quarterPeriodCycles >= 1` guard used to provide
-   (round-up always gives ≥ 1 for any positive clock, so the old
-   guard would no longer catch under-clocked configs).
+4. **`BusTiming.tLow` carries a shortfall stretch.** First-pass
+   review settled on `tLow = max(2 × qpc, tLowMin)` and accepted
+   that achieved SCL would sit slightly above `busFreqHz` for
+   non-clean clock/bus ratios (e.g., 25 MHz Fast+ landed at
+   892.86 kHz, ~10.7 % below 1 MHz; later iterations also showed
+   12 MHz Fast 6.25 % below). Round 3 of the review noticed the
+   pattern was always "the floor period is one or two cycles
+   short of `ceil(clkFreqHz / busFreqHz)`", which is recoverable
+   by dumping the missing cycles into `tLow`. The new
+   `shortfall = max(0, ceil(clkFreqHz/busFreqHz) - (tHigh + tLow0))`
+   term restores an *exact* SCL frequency in 7 of the 9 cells of
+   the `{Standard, Fast, Fast+} × {12, 25, 48} MHz` test matrix.
+   The remaining two cells (Fast at 25 MHz / 48 MHz) deviate by
+   −0.79 % / −2.44 % — `tLowMin` already exceeds half the bit
+   period there, so the period is stretched past the ideal and
+   the shortfall has nothing to add. That residue is well inside
+   any I²C target's tolerance; eliminating it would require
+   shrinking `tHigh` below `2 × qpc` and breaking the
+   bit-controller's mid-`tHigh` sampling-grid assumption.
+   The shortfall lands on `tLow` rather than `tHigh` because (a)
+   it preserves the `tHigh = k × qpc` grid the bit-controller
+   wants, and (b) extra `tLow` is the I²C clock-stretching idiom
+   the protocol explicitly allows.
 
 **Sim:**
 
