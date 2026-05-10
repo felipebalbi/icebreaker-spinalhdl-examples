@@ -4,9 +4,9 @@ A from-scratch I²C **controller** and **target** in SpinalHDL, targeting
 the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
-Status: **Phase 0 in progress** — `I2cConfig` and `I2cIo` have
-landed; `BusTiming` helper is still to come. See `TODO.md` for the
-full bring-up plan.
+Status: **Phase 0 complete** — `I2cConfig`, `I2cIo`, and `BusTiming`
+have all landed with sims. Next up is `I2cBitController`. See
+`TODO.md` for the full bring-up plan.
 
 ## What's in scope
 

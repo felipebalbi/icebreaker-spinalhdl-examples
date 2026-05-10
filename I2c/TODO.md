@@ -17,6 +17,8 @@ survives independently of the source.
 - [x] `AddrMode` SpinalEnum (SevenBits / TenBits)
 - [x] `I2cIo` bundle: `ReadableOpenDrain` SCL + SDA
 - [x] `I2cIoSim` (sim-side wired-AND glue, reused by later sims)
+- [x] `BusTiming` (spec-floor cycle table reconciled with `quarterPeriodCycles`)
+- [x] `BusTimingSim` (pure-Scala spec-floor audit across BusSpeed × clkFreqHz)
 
 ---
 
@@ -131,87 +133,94 @@ aggregate and `.PHONY`.
 
 ### ✅ Step 3 — `BusTiming`
 
-**Goal:** turn `I2cConfig` into a named table of cycle counts the
-bit / byte controllers can read by symbol (`tHigh`, `tLow`, …)
+**Goal (recap):** turn `I2cConfig` into a named table of cycle counts
+the bit / byte controllers can read by symbol (`tHigh`, `tLow`, …)
 instead of re-deriving timing from `clkFreqHz` at every site. Pure
 elaboration-time math — no `Component`.
 
-**File:** `src/hw/BusTiming.scala`
+**Files:**
+- `src/hw/BusTiming.scala` — final table.
+- `src/sim/BusTimingSim.scala` — pure-Scala spec-floor audit.
+- `Makefile` — `sim-bustiming` target wired into the `sim` aggregate
+  and `.PHONY` line.
 
-**Suggested IO:** none — it's a `case class` consumed by value,
-the same way `I2cConfig` is.
+**What landed:**
 
-```scala
-// All values are integer system-clock cycle counts, rounded up so the
-// hardware never undershoots the spec. Symbol names match the I²C
-// spec table verbatim so cross-referencing the datasheet is trivial.
-case class BusTiming(cfg: I2cConfig) {
-  // Bit-period halves
-  val tHigh:  Int = ???   // SCL high time           (>= spec tHIGH)
-  val tLow:   Int = ???   // SCL low time            (>= spec tLOW)
-  // Start / stop framing
-  val tHdSta: Int = ???   // hold time after START   (>= spec tHD;STA)
-  val tSuSto: Int = ???   // setup time before STOP  (>= spec tSU;STO)
-  val tBuf:   Int = ???   // bus-free between txns   (>= spec tBUF)
-  // Data slot
-  val tSuDat: Int = ???   // SDA setup before SCL↑   (>= spec tSU;DAT)
-  val tHdDat: Int = ???   // SDA hold after SCL↓     (>= spec tHD;DAT)
-}
-```
+- `case class BusTiming(cfg: I2cConfig)`, no Spinal imports needed
+  — this file is pure Scala. Each public field is an `Int` cycle
+  count usable directly as a counter constant in downstream FSMs.
+- Per-speed-grade spec floors live in a private
+  `case class SpeedMins(...)` and a single `match` on
+  `cfg.busSpeed`. Adding `BusSpeed.HighSpeed` later is one new
+  match arm, not a touch-every-call-site refactor.
+- Round-up `ns → cycles` conversion in `toClockCycles`, with the
+  intermediate product in `Long` (see "Divergence #1" below).
+- Two-tier scheduling (see "Divergence #2"):
+  - `tHighMin` / `tLowMin` carry the spec floor in cycles.
+  - `tHigh` / `tLow` are what the bit-controller actually
+    schedules: `max(2 × quarterPeriodCycles, tXxxMin)`.
+- Framing (`tHdSta`, `tSuSta`, `tSuSto`, `tBuf`) and data-slot
+  (`tSuDat`, `tHdDat`) values stay as straight round-ups from the
+  spec minimum — they don't sit on the quarter-period grid.
+- `tSuSta` (setup-for-repeated-START) added — see "Divergence #3".
+- Elaboration-time `assert`s pin the `tHigh ≥ tHighMin`,
+  `tLow ≥ tLowMin`, and `tHigh + tLow ≥ 4 × quarterPeriodCycles`
+  invariants for future readers.
 
-**Design notes:**
-- **Round up, never down.** Use `(num + den - 1) / den` for every
-  derivation: spec values are minimums, and rounding down would
-  silently produce an under-spec waveform that "works" on a slow
-  target but breaks on a strict one. The error case from
-  `I2cConfig.quarterPeriodCycles >= 1` should be the only path
-  that fails elaboration.
-- **Source of truth.** `quarterPeriodCycles` already lives on
-  `I2cConfig` and stays there (callers may still want it for
-  symmetric mid-phase sampling). Everything else lives here, so
-  there is exactly one place to look up "how many cycles is
-  tHIGH".
-- **Spec table (Standard mode @ 100 kHz):**
+**Divergences from the original hint:**
 
-  | Symbol  | Min     | Cycles @ 12 MHz |
-  |---------|---------|-----------------|
-  | tHIGH   | 4.0 µs  | 48              |
-  | tLOW    | 4.7 µs  | 57              |
-  | tHD;STA | 4.0 µs  | 48              |
-  | tSU;STO | 4.0 µs  | 48              |
-  | tBUF    | 4.7 µs  | 57              |
-  | tSU;DAT | 0.25 µs | 3               |
-  | tHD;DAT | 0 µs    | 0 (≥0 is fine)  |
+1. **Int → Long for the `ns × clkFreqHz` product.** The hint code
+   used `Int * Int` arithmetic. That overflows silently for every
+   realistic combo (e.g., 12 MHz × 4700 ns = 5.64 × 10¹⁰, vs
+   `Int.MaxValue` ≈ 2.15 × 10⁹), publishing garbage cycle counts
+   without any error. `toClockCycles` now widens both operands to
+   `Long` before multiplying and `require`s the final value fits an
+   `Int`. The new sim's `regressionOverflowFix` pins this.
+2. **Two-tier `tHigh` / `tLow` instead of a single floor.** The
+   original sketch published the spec floors directly as `tHigh` /
+   `tLow`. Two problems with that:
+   - It violated the `I2c/AGENTS.md` rule that `BusTiming` must
+     consume `cfg.quarterPeriodCycles` rather than re-derive timing
+     from `clkFreqHz` / `busFreqHz` — under the original sketch,
+     `tHigh + tLow` and `4 × quarterPeriodCycles` were two
+     independent rounding paths.
+   - A symmetric 50/50 schedule at exactly `busFreqHz` is
+     mathematically impossible in Fast mode at *any* clock
+     (`tLow ≥ 1.3 µs` exceeds half of 1/400 kHz = 1.25 µs). So
+     publishing `tHigh = tLow = 2 × qpc` and `require`-ing the
+     spec floor would render Fast mode unreachable. Stretching the
+     longer phase (here: `tLow`) when the spec demands it is the
+     standard fix; the achieved SCL frequency drops slightly below
+     `busFreqHz`, which the spec explicitly allows.
+3. **Added `tSuSta` (repeated-START setup).** Distinct from
+   `tHdSta` per the spec; the bit-controller (Step 4) needs it for
+   repeated-START framing, and the spec table was already open in
+   the file. Cheaper to add now than to revisit during Step 4.
 
-  Encode the per-`BusSpeed` minimums as a private lookup table
-  inside `BusTiming` (a `BusSpeed.E => SpeedMins` map or a `match`)
-  — same single-source-of-truth pattern `I2cConfig.busFreqHz`
-  already uses.
-- **No runtime knobs.** Everything is `val`s computed from `cfg`,
-  so the synthesised design carries plain integer constants. If a
-  caller wants to tweak `tHigh` per-instance, they should build a
-  new `I2cConfig`, not poke `BusTiming`.
-- **`tHdDat = 0` is legal** by the spec. Make sure the bit
-  controller treats `0` as "no extra hold cycles" without
-  off-by-one weirdness.
+**Sim:**
 
-**Sim hints (`src/sim/BusTimingSim.scala`):**
-- No clock to drive — this is a pure-Scala test. Use a plain
-  `object BusTimingSim { def main(...) }` like
-  `BaudGeneratorSim`, but skip `SimConfig.compile`.
-- Iterate over every `BusSpeed` × a few `clkFreqHz`
-  (12 MHz, 25 MHz, 48 MHz). Print the resulting table.
-- Assert the 12 MHz / Standard row matches the table above —
-  that's the regression net for the rounding rule.
-- Assert that for every row, `tHigh + tLow >= clkFreqHz /
-  busFreqHz` (the bit period must cover one full SCL period).
-- Negative test: `I2cConfig(clkFreqHz = 1000, busSpeed =
-  FastPlus)` must throw at construction (already enforced by
-  `I2cConfig`'s `require`, but pin it down here so we notice if
-  the guard is ever weakened).
+`BusTimingSim` is a pure-Scala `object` with a `main` — no
+`SimConfig.compile`, no DUT to wrap. It iterates every
+`(BusSpeed × {12, 25, 48} MHz)` combo and:
 
-**Makefile:** `sim-bustiming` target; add to `sim` aggregate and
-`.PHONY`.
+- Asserts every published cycle count meets its spec floor in real
+  time (`cycles × 1e9 / clkFreqHz ≥ specMinNs`). The spec table is
+  duplicated independently in the sim file so the test isn't
+  fooled by a buggy `BusTiming` "agreeing with itself".
+- Asserts the floor invariants `tHigh ≥ tHighMin`,
+  `tLow ≥ tLowMin`, and `tHigh + tLow ≥ 4 × qpc`.
+- Asserts the achieved SCL frequency never exceeds `busFreqHz`
+  (within 0.5 % rounding slack).
+- Pins the 32-bit overflow regression: `BusTiming(12 MHz, Standard)`
+  produces `tBuf == 57`; an unfixed Int overflow would publish a
+  negative or wrapped value.
+- Pins the `I2cConfig` under-clock guard: a 100 kHz / Standard
+  config must throw at construction.
+
+Prints a formatted table per combo for human eyeballing.
+
+**Makefile:** `sim-bustiming` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 
