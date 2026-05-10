@@ -2,43 +2,46 @@ package uart
 
 import spinal.core._
 import spinal.lib._
+import spinal.lib.bus.amba3.apb._
+import spinal.lib.fsm._
 
-/** Minimal hardware echo demo: receive a byte, send it right back.
+/** Minimal hardware echo demo, register-mapped edition.
   *
-  * This is the smallest possible end-to-end test of the entire UART
-  * stack. If you can attach `picocom` to the board, type a key, and see
-  * it appear back in the terminal, then *every* part of the design is
-  * working: TX path, RX path, clock domain, reset wiring, baud match,
-  * pcf pins, idle-line behaviour. It is the milestone hardware test.
+  * Same on-the-wire behaviour as the legacy UartEchoDemo (RX byte in →
+  * TX byte out), but the byte plumbing now sits behind a
+  * memory-mapped [[UartController]] instead of touching the streaming
+  * cores directly. This makes the demo a tiny ad-hoc CPU that drives
+  * an APB3 bus — exactly the topology a soft-core (VexRiscv etc.)
+  * would present, just with a dozen-state FSM standing in for the
+  * processor.
   *
-  * Composition:
-  *   - [[UartRx]] takes the line in and produces a Stream of bytes
-  *   - a [[StreamFifo]] buffers up to `fifoDepth` bytes between RX and TX
-  *   - [[UartTx]] drains the FIFO back out
+  * Why structure it this way instead of the original direct-Stream
+  * version?
   *
-  * The FIFO matters even though RX and TX run at the same baud:
-  * dropping it would couple the two halves' back-pressure, so any TX
-  * stall (start/stop bit timing, mid-frame) would force the RX to
-  * report overrun. With even a 1-deep FIFO, RX can finish a frame
-  * while TX is mid-transmit. Default depth 16 is a free safety margin.
+  *   - Exercises the full [[UartController]] register file end-to-end
+  *     (STATUS poll, RXDATA pop, TXDATA push). If the controller's
+  *     APB read/write address-decode is wrong, this demo silently
+  *     stops echoing — a much sharper bring-up signal than a sim
+  *     pass alone.
+  *   - Same iCEbreaker pin map as before, so the existing pcf and
+  *     `make` / `make flash` flow keeps working.
   *
-  * Flow control is OFF on both sides (`useCts = false`, `useRts =
-  * false`) so this demo works against a vanilla USB-UART and a default
-  * `picocom` configuration.
+  * On-chip topology:
+  *   - [[UartController]] owns the FIFOs, BaudGenerator, and registers
+  *   - this Component is a hand-rolled APB master that polls STATUS,
+  *     reads RXDATA, and writes TXDATA in a loop.
   *
-  * Same `ClockDomain` pattern as [[UartTxDemo]]: the iCE40's `reset`
-  * pin is wired explicitly (RISING / ASYNC / active-LOW) so the user
-  * button actually resets the design.
+  * Same `ClockDomain` shape as the rest of the project: explicit
+  * RISING/ASYNC/active-LOW reset so the iCEbreaker user button works.
   *
   * @param cfg
   *   Compile-time UART configuration. Defaults to 8N1 with no flow
-  *   control.
-  * @param fifoDepth
-  *   Bytes the buffer between RX and TX can hold.
+  *   control. The UartController's BAUD register is loaded with the
+  *   compile-time-correct phase increment so the demo hits the
+  *   configured baud out of reset.
   */
 case class UartEchoDemo(
-    cfg: UartConfig = UartConfig(useCts = false, useRts = false),
-    fifoDepth: Int = 16
+    cfg: UartConfig = UartConfig(useCts = false, useRts = false)
 ) extends Component {
   require(
     !cfg.useCts && !cfg.useRts,
@@ -47,41 +50,22 @@ case class UartEchoDemo(
 
   val io = new Bundle {
 
-    /** The board's free-running 12 MHz clock (pcfg maps to pin 32). */
+    /** The board's free-running 12 MHz clock (pcf maps to pin 32). */
     val clk = in Bool ()
 
     /** Active-LOW reset from the iCEbreaker user button (pcf maps to
-      * pin 10). The button pulls the line high through a pull-up and
-      * shorts it to ground when pressed., so "reset asserted" means
-      *  the pin is at 0 V.
+      * pin 10). Pulled high through a pull-up; shorted to ground when
+      * pressed.
       */
     val reset = in Bool ()
 
-    /** Serial input from the host's USB-UART TX (pcf maps to pin 6).
-      * Idles high; UART frames per `cfg`.
-      */
+    /** Serial input from the host's USB-UART TX (pcf maps to pin 6). */
     val rx = in Bool ()
 
-    /** Serial output to the host's USB-UART RX (pcf maps to pin 9).
-      * Idles high; UART frames per `cfg`.
-      */
+    /** Serial output to the host's USB-UART RX (pcf maps to pin 9). */
     val tx = out Bool ()
   }
 
-  // Build an explicit ClockDomain rather than relying on Spinal's
-  // implicit default. This is the only way to wire the `reset`
-  // pin into the design; without it the pin is unconnected and the
-  // user button does nothing.
-  //
-  //   - clockEdge        = RISING : standard for this part.
-  //   - resetActiveLevel = LOW    : matches the iCEbreaker user
-  //                                 button (pulled high, grounded
-  //                                 when pressed).
-  //   - resetKind        = ASYNC  : the button isn't synchronous to
-  //                                 anything — assertion is async.
-  //                                 Spinal will still register it
-  //                                 on the way in via the default
-  //                                 reset BufferCC.
   val mainClockDomain = ClockDomain(
     clock = io.clk,
     reset = io.reset,
@@ -94,45 +78,111 @@ case class UartEchoDemo(
 
   val core = new ClockingArea(mainClockDomain) {
 
-    // ----- pure UART halves --------------------------------------------------
+    val uart = UartController(cfg)
 
-    val rx = UartRx(cfg)
-    val tx = UartTx(cfg)
-
-    // ----- echo FIFO ---------------------------------------------------------
+    // ----- APB3 master FSM ------------------------------------------------
     //
-    // Sits between RX and TX so a brief TX stall doesn't cause RX to
-    // overrun. Naturally back-pressures: when the FIFO fills,
-    // `push.ready` falls and RX raises `overrun` — but in practice
-    // 16 bytes is wildly more than we'll ever queue at matched baud.
-    val fifo = StreamFifo(Bits(cfg.dataBits bits), fifoDepth)
-
-    // ----- wiring ------------------------------------------------------------
-
-    rx.io.rx := io.rx
-    fifo.io.push << rx.io.payload
-    tx.io.data << fifo.io.pop
-
-    // ----- registered output ------------------------------------------------
+    // APB3 is two-phase per transaction:
+    //   - SETUP : PSEL=1, PENABLE=0, address+write+wdata valid
+    //   - ACCESS: PSEL=1, PENABLE=1; on this cycle PRDATA is sampled
+    //     and PREADY is checked.
+    // We don't bother with PREADY/PSLVERR (UartController doesn't drive
+    // PREADY low) so each transaction is a clean 2-cycle pulse.
     //
-    // Same idle-high reset trick as UartTxDemo. Costs one flop, gives
-    // a clean high level on the line during the first cycle after
-    // reset before the FSM has its bearings.
-    val txOut = RegNext(tx.io.tx) init (True)
+    // The loop is: poll STATUS → if rx_data_avail then read RXDATA into
+    // a holding register and write it to TXDATA.
+
+    val statusAddr = U(0x04, 8 bits)
+    val rxDataAddr = U(0x14, 8 bits)
+    val txDataAddr = U(0x10, 8 bits)
+
+    // Holding register for the byte we just read from RXDATA.
+    val byteReg = Reg(Bits(cfg.dataBits bits)) init (0)
+
+    // Default APB drives.
+    uart.io.apb.PSEL := B(0)
+    uart.io.apb.PENABLE := False
+    uart.io.apb.PWRITE := False
+    uart.io.apb.PADDR := U(0, 8 bits)
+    uart.io.apb.PWDATA := B(0, 32 bits)
+
+    val fsm = new StateMachine {
+
+      val pollSetup = new State with EntryPoint
+      val pollAccess = new State
+      val readRxSetup = new State
+      val readRxAccess = new State
+      val writeTxSetup = new State
+      val writeTxAccess = new State
+
+      pollSetup.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PADDR := statusAddr
+        uart.io.apb.PWRITE := False
+        goto(pollAccess)
+      }
+
+      pollAccess.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PENABLE := True
+        uart.io.apb.PADDR := statusAddr
+        uart.io.apb.PWRITE := False
+        // STATUS bit 3 = rx_data_avail.
+        when(uart.io.apb.PRDATA(3)) {
+          goto(readRxSetup)
+        } otherwise {
+          goto(pollSetup)
+        }
+      }
+
+      readRxSetup.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PADDR := rxDataAddr
+        uart.io.apb.PWRITE := False
+        goto(readRxAccess)
+      }
+
+      readRxAccess.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PENABLE := True
+        uart.io.apb.PADDR := rxDataAddr
+        uart.io.apb.PWRITE := False
+        byteReg := uart.io.apb.PRDATA(cfg.dataBits - 1 downto 0)
+        goto(writeTxSetup)
+      }
+
+      writeTxSetup.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PADDR := txDataAddr
+        uart.io.apb.PWRITE := True
+        uart.io.apb.PWDATA := byteReg.resize(32)
+        goto(writeTxAccess)
+      }
+
+      writeTxAccess.whenIsActive {
+        uart.io.apb.PSEL := B(1)
+        uart.io.apb.PENABLE := True
+        uart.io.apb.PADDR := txDataAddr
+        uart.io.apb.PWRITE := True
+        uart.io.apb.PWDATA := byteReg.resize(32)
+        goto(pollSetup)
+      }
+    }
+
+    // ----- pin wiring -----------------------------------------------------
+
+    uart.io.rx := io.rx
+
+    // Same idle-high reset trick as the legacy demo.
+    val txOut = RegNext(uart.io.tx) init (True)
   }
 
   io.tx := core.txOut
 }
 
-/** Verilog generation entry point for the echo demo.
-  *
-  * Run via `make` — set the Makefile's TOP variable to `UartEchoDemo`
-  * and this is what `gen/UartEchoDemo.v` is built from.
-  */
+/** Verilog generation entry point for the echo demo. */
 object UartEchoDemoVerilog {
   def main(args: Array[String]): Unit = {
-    SpinalConfig(
-      targetDirectory = "gen"
-    ).generateVerilog(UartEchoDemo())
+    SpinalConfig(targetDirectory = "gen").generateVerilog(UartEchoDemo())
   }
 }

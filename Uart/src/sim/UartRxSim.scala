@@ -66,6 +66,11 @@ object UartRxSim {
       .compile(UartRx(cfg))
       .doSim(cfgLabel) { dut =>
         dut.clockDomain.forkStimulus(10)
+        dut.io.baudPhaseInc #= BaudGenerator.phaseIncFor(
+          cfg.clkFreqHz,
+          cfg.baudRate * cfg.oversample,
+          BaudGenerator.defaultAccWidth
+        )
 
         // Defaults.
         dut.io.rx #= true

@@ -61,13 +61,20 @@ case class UartTx(cfg: UartConfig) extends Component {
       * *start* of new frames.
       */
     val cts = cfg.useCts generate (in Bool ())
+
+    /** DDS phase increment for the internal baud generator. Wire to a
+      * constant for fixed-baud builds (use [[BaudGenerator.phaseIncFor]]),
+      * or to a CSR field for runtime baud (see [[UartController]]).
+      */
+    val baudPhaseInc = in UInt (BaudGenerator.defaultAccWidth bits)
   }
 
-  val baud = BaudGenerator(cfg)
+  val baud = BaudGenerator(BaudGenerator.defaultAccWidth)
   val sreg = TxShiftReg(cfg)
   val fsm = TxFsm(cfg)
 
   baud.io.enable := fsm.io.busy // tick only while transmitting
+  baud.io.phaseInc := io.baudPhaseInc
   fsm.io.tick := baud.io.tick
 
   sreg.io.load := fsm.io.loadReg

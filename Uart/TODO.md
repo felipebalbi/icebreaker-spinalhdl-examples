@@ -32,6 +32,13 @@ needs it.
 - [x] `UartEchoDemo` (RX → FIFO → TX) + `icebreaker.pcf` `io_rx`
 - [x] **Hardware bring-up: end-to-end echo loop running on the
       iCEbreaker — `picocom` round-trips characters cleanly.** 🎉
+- [x] `UartController` (APB3-fronted, regif-generated register file)
+- [x] `UartConfig.fifoDepth` parameter
+- [x] Runtime-tunable BAUD via DDS `phaseInc` register
+- [x] `UartEchoDemo` rebuilt on top of `UartController` + a tiny
+      APB master FSM
+- [x] `make docs` target — HTML / C / JSON / RALF / RDL datasheet
+      generators
 
 ---
 
@@ -457,6 +464,99 @@ composition pattern, no new design problems — so they're explicitly
   dropping it would couple back-pressure and force RX-side
   overrun any time TX stalled mid-frame. With the FIFO, RX can
   finish a frame while TX is mid-transmit.
+
+---
+
+## ✅ Phase 3 — Memory-mapped controller (`UartController` + regif)
+
+### ✅ Step 11 — `UartController` register file
+
+**What landed:**
+
+- **Files added/changed:**
+  - `src/hw/UartController.scala` — APB3-fronted wrapper around
+    `UartTx`/`UartRx`. Owns TX/RX `StreamFifo`s (`cfg.fifoDepth`,
+    default 16), runtime-tunable BAUD register driving the DDS,
+    and a regif register file (`spinal.lib.bus.regif`) covering
+    CTRL / STATUS / ISR / IER / TXDATA / RXDATA / BAUD / CFG_INFO
+    / CLKFREQ.
+  - `src/hw/UartConfig.scala` — added `fifoDepth: Int = 16`.
+  - `src/hw/BaudGenerator.scala` — refactored to take an
+    `accWidth` only (no longer takes the full `UartConfig`); its
+    `phaseInc` is a runtime input. Added the
+    `BaudGenerator.phaseIncFor(...)` helper so callers can compute
+    a compile-time-correct constant for static configurations.
+  - `src/hw/UartTx.scala`, `src/hw/UartRx.scala` — both now expose
+    `io.baudPhaseInc` as a mandatory input and wire it straight
+    into their internal `BaudGenerator`. RX must pre-shift by
+    `oversample`.
+  - `src/hw/UartEchoDemo.scala` — fully rewritten on top of
+    `UartController` + a hand-rolled APB3-master FSM. Same
+    on-the-wire behaviour, same `icebreaker.pcf` pinout.
+  - `src/hw/UartTxDemo.scala`, `src/sim/BaudGeneratorSim.scala`,
+    `src/sim/UartTxSim.scala`, `src/sim/UartRxSim.scala` — updated
+    to drive the new `phaseInc` input via
+    `BaudGenerator.phaseIncFor(cfg, ...)`.
+  - `src/sim/UartControllerSim.scala` — APB-driven loopback test
+    using `Apb3Driver`. Exercises CTRL/STATUS/ISR/RXDATA/TXDATA
+    end to end and proves RC sticky-clear semantics.
+  - `Makefile` — added `sim-controller`, `gen-controller`, and
+    `docs` targets; added `sim-controller` to the `sim` aggregate
+    and `.PHONY`.
+
+- **Address map (machine-readable in the generated regif docs):**
+  ```
+  0x00 CTRL     RW   [0]=enable [1]=tx_enable [2]=rx_enable
+  0x04 STATUS   RO   tx_busy / fifo_full / fifo_empty / rx_data_avail / rx_fifo_full
+  0x08 ISR      RC   sticky framing/parity/overrun/tx_done/rx_done
+  0x0C IER      RW   per-bit interrupt mask, mirrors ISR layout
+  0x10 TXDATA   WO   write pushes a byte into the TX FIFO
+  0x14 RXDATA   RO   read pops the RX FIFO front
+  0x18 BAUD     RW   DDS phase increment, reset = phaseIncFor(cfg)
+  0x1C CFG_INFO RO   dataBits / stopBits / parity / oversample / fifoDepth
+  0x20 CLKFREQ  RO   cfg.clkFreqHz
+  ```
+
+- **Divergences from the original ad-hoc plan and rationale:**
+  1. **Errors are sticky-with-read-clear (RC), not W1C.** RC matches
+     the 16550's "read LSR clears it" pattern firmware writers
+     are familiar with, and avoids the W1C race window where a
+     fresh error pulse arriving on the same cycle as the clear
+     would be lost. ISR/IER mirror layouts so a single OR-reduce
+     drives the IRQ line cleanly.
+  2. **TXDATA/RXDATA are hand-rolled on top of regif's `doWrite` /
+     `doRead` + `writeAddress()` / `readAddress()` rather than the
+     stock `RW` field model.** A FIFO push isn't a register; we
+     want a one-cycle pulse, not stored state. The plain `WO` /
+     `RO` fields are kept anyway so they appear in the generated
+     datasheet at the right offset — they document the address,
+     while the FIFO wiring sits in user logic.
+  3. **`busif.writeData` is sourced for the TX FIFO push instead
+     of the field's stored value.** The field updates one cycle
+     after `doWrite`; using `writeData` keeps the FIFO push
+     payload aligned with the ACCESS phase of the APB transaction.
+  4. **`UartConfig.useCts` and `useRts` are forbidden in v1.** The
+     register layout would otherwise need MODEM-control fields,
+     and the streaming cores' CTS plumbing isn't mapped through
+     yet. Forced to `false` via `require`.
+  5. **`oversample` must be a power of two.** The RX baud generator
+     runs at `phaseInc << log2(oversample)`; a non-power-of-two
+     oversample would leave rounding error in the shift. Default
+     16 satisfies this.
+
+- **Sim:** `src/sim/UartControllerSim.scala`, run with
+  `make sim-controller`. Loopback at the UART line: APB writes to
+  TXDATA, the testbench feeds TX → RX, APB reads from RXDATA,
+  bytes round-trip unchanged. Also exercises CFG_INFO/CLKFREQ
+  introspection and ISR.rx_done sticky-then-clear-on-read.
+
+- **Documentation generation:** `make docs` runs
+  `UartControllerDocs`, which writes `gen/uart_controller.html`
+  (datasheet), `.h` (C header), `.json`, `.ralf`, and `.rdl`
+  (SystemRDL) — all derived from the regif `doc = "..."`
+  parameters on each register/field.
+
+- **Makefile:** `sim-controller`, `gen-controller`, `docs`.
 
 ---
 

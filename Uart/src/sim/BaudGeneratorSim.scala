@@ -37,9 +37,10 @@ object BaudGeneratorSim {
     val numTicks = 200 // enough samples to average out jitter
 
     SimConfig.withWave
-      .compile(BaudGenerator(cfg, accWidth = 24))
+      .compile(BaudGenerator(accWidth = 24))
       .doSim { dut =>
         dut.clockDomain.forkStimulus(period = 10)
+        dut.io.phaseInc #= BaudGenerator.phaseIncFor(cfg, dut.accWidth)
 
         // ---- (1) enable low: should never tick ----------------------------
         dut.io.enable #= false

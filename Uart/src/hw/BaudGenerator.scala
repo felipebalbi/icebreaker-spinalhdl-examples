@@ -31,12 +31,23 @@ import spinal.core._
   *   With accWidth=24 and 12 MHz / 115200 baud:
   *     phaseInc ≈ 161061, actual baud ≈ 115199.81 (~0.0002% error).
   *
-  * @param cfg       UART config; supplies clkFreqHz and baudRate.
+  * Runtime vs. compile-time phaseInc:
+  *   The phase increment is now fed in via [[io.phaseInc]] rather than
+  *   computed at elaboration. This lets a higher-level wrapper (e.g.
+  *   [[UartController]]) drive it from a memory-mapped register so
+  *   firmware can change baud at runtime.
+  *
+  *   Bare instantiations of [[UartTx]] / [[UartRx]] still want a
+  *   compile-time-correct default, so [[BaudGenerator.phaseIncFor]]
+  *   exposes the same rounding math as a pure-Scala helper. Those
+  *   wrappers wire `phaseInc` to the constant returned by that helper,
+  *   which the synth tool will fold into the adder.
+  *
   * @param accWidth  Phase accumulator width in bits. Larger = more accurate
   *                  baud rate (and slightly more LUTs). 24 is plenty for
   *                  any realistic UART.
   */
-case class BaudGenerator(cfg: UartConfig, accWidth: Int = 24) extends Component {
+case class BaudGenerator(accWidth: Int = 24) extends Component {
   val io = new Bundle {
 
     /** Hold low to keep the generator quiescent (acc = 0, no ticks). Raise high
@@ -47,20 +58,19 @@ case class BaudGenerator(cfg: UartConfig, accWidth: Int = 24) extends Component 
       */
     val enable = in Bool ()
 
-    /** One-cycle pulse, on average once every `clkFreqHz / baudRate` cycles.
+    /** DDS phase increment. With `accWidth` = 24 and a 12 MHz system clock, a
+      * value of 161 061 produces ~115 200 baud. See
+      * [[BaudGenerator.phaseIncFor]] for the standard rounding rule. The
+      * generator samples this every cycle; updates take effect on the next
+      * tick.
+      */
+    val phaseInc = in UInt (accWidth bits)
+
+    /** One-cycle pulse, on average once every `2^accWidth / phaseInc` cycles.
       * Registered, so glitch-free.
       */
     val tick = out Bool ()
   }
-
-  // Round-to-nearest gives slightly better long-term accuracy than the
-  // default truncating integer division. Difference is microscopic at
-  // accWidth=24 but free, so why not.
-  val phaseInc: Long = (
-    ((BigInt(cfg.baudRate) << accWidth) + (BigInt(
-      cfg.clkFreqHz
-    ) >> 1)) / cfg.clkFreqHz
-  ).toLong
 
   /** Phase accumulator. The extra MSB captures overflow from the add. */
   val acc = Reg(UInt(accWidth + 1 bits)) init (0)
@@ -71,10 +81,35 @@ case class BaudGenerator(cfg: UartConfig, accWidth: Int = 24) extends Component 
     // Take only the bottom accWidth bits of the previous accumulator
     // (i.e. clear last cycle's carry), zero-extend, then add phaseInc.
     // Any carry into bit `accWidth` is this cycle's tick.
-    acc := acc(accWidth - 1 downto 0).resize(accWidth + 1) + phaseInc
+    acc := acc(accWidth - 1 downto 0).resize(accWidth + 1) + io.phaseInc
   }
 
   // Register the tick to keep the output glitch-free and timing clean.
   // Costs 1 cycle of latency, irrelevant at baud-rate timescales.
   io.tick := RegNext(acc.msb) init (False)
+}
+
+object BaudGenerator {
+
+  /** Default DDS accumulator width. 24 bits is enough for ppm-level baud
+    * accuracy at any realistic UART rate; making it a constant lets every
+    * consumer (BaudGenerator instance, UartTx/UartRx io ports, regif BAUD
+    * field) agree on the same width without threading a parameter through
+    * the entire stack.
+    */
+  val defaultAccWidth: Int = 24
+
+  /** Pure-Scala helper: compute the phase increment needed to hit `baudRate`
+    * on a clock of `clkFreqHz`, with `accWidth` accumulator bits. Round-to-
+    * nearest; matches the rule the original compile-time generator used.
+    */
+  def phaseIncFor(clkFreqHz: Int, baudRate: Int, accWidth: Int = 24): Long = {
+    require(clkFreqHz > 0 && baudRate > 0, "clkFreqHz and baudRate must be > 0")
+    (((BigInt(baudRate) << accWidth) + (BigInt(clkFreqHz) >> 1))
+      / clkFreqHz).toLong
+  }
+
+  /** Same, but pulled straight from a [[UartConfig]] for the common case. */
+  def phaseIncFor(cfg: UartConfig, accWidth: Int): Long =
+    phaseIncFor(cfg.clkFreqHz, cfg.baudRate, accWidth)
 }

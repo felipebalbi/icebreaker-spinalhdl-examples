@@ -62,6 +62,12 @@ object ParityType extends SpinalEnum {
   *   asserts `overrun` if a byte arrives while downstream isn't ready. Note the
   *   asymmetry with `useCts`: CTS gates *our* TX frame starts, RTS announces
   *   *our* RX readiness to the other side.
+  * @param fifoDepth
+  *   Depth (in bytes) of the TX and RX FIFOs that buffer between the streaming
+  *   cores and any wrapper that talks to them through a memory-mapped bus
+  *   (e.g. [[UartController]]). 16 is the 16550 default and a comfortable
+  *   middle ground on UP5K BRAM. Ignored by the bare [[UartTx]] / [[UartRx]]
+  *   cores — they have no FIFO of their own.
   */
 case class UartConfig(
     clkFreqHz: Int = 12000000,
@@ -71,7 +77,8 @@ case class UartConfig(
     parity: ParityType.E = ParityType.None,
     useCts: Boolean = true,
     oversample: Int = 16,
-    useRts: Boolean = true
+    useRts: Boolean = true,
+    fifoDepth: Int = 16
 ) {
 
   /** Average number of system-clock cycles per UART bit period.
@@ -86,4 +93,5 @@ case class UartConfig(
   require(dataBits >= 5 && dataBits <= 9, "dataBits must be 5..9")
   require(stopBits == 1 || stopBits == 2, "stopBits must be 1 or 2")
   require(oversample >= 1, "oversample must be >= 1")
+  require(fifoDepth >= 1, "fifoDepth must be >= 1")
 }

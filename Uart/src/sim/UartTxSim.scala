@@ -78,6 +78,8 @@ object UartTxSim {
       .compile(UartTx(cfg))
       .doSim { dut =>
         dut.clockDomain.forkStimulus(10)
+        dut.io.baudPhaseInc #=
+          BaudGenerator.phaseIncFor(cfg, BaudGenerator.defaultAccWidth)
 
         // ---------- helpers ----------------------------------------------
 

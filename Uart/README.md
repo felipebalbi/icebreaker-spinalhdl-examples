@@ -23,8 +23,12 @@ Once you've internalised that loop the rest of the repo is variations on
 the theme.
 
 > Status: TX, RX, and the bidirectional echo demo are all running on
-> real hardware. Optional follow-ons (RX-only LED demo, dual-direction
-> demo, counter-based BaudGenerator variant) live in `TODO.md`.
+> real hardware. The echo demo now sits on top of `UartController`,
+> an APB3-fronted register-mapped wrapper with TX/RX FIFOs,
+> runtime-tunable baud, sticky errors, and an auto-generated IP
+> datasheet (`make docs`). Optional follow-ons (RX-only LED demo,
+> dual-direction demo, counter-based BaudGenerator variant) live in
+> `TODO.md`.
 
 ## Block diagram
 

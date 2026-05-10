@@ -108,14 +108,23 @@ case class UartRx(cfg: UartConfig) extends Component {
       *  Setting `cfg.useRts = false` removes this port entirely.
       */
     val rts = cfg.useRts generate (out Bool ())
+
+    /** DDS phase increment for the internal baud generator. Note this is the
+      * RX-side increment, which needs to run at `oversample × baudRate` —
+      * use `BaudGenerator.phaseIncFor(clkFreqHz, baudRate * oversample, ...)`
+      * for a fixed-baud build, or shift the controller's TX phaseInc up by
+      * `log2(oversample)`.
+      */
+    val baudPhaseInc = in UInt (BaudGenerator.defaultAccWidth bits)
   }
 
   val sync = RxSync()
-  val baud = BaudGenerator(cfg.copy(baudRate = cfg.baudRate * cfg.oversample))
+  val baud = BaudGenerator(BaudGenerator.defaultAccWidth)
   val fsm = RxFsm(cfg)
 
   sync.io.asyncIn := io.rx
   baud.io.enable := True
+  baud.io.phaseInc := io.baudPhaseInc
   fsm.io.tick := baud.io.tick
 
   fsm.io.rx := sync.io.syncOut

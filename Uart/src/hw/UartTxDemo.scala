@@ -103,6 +103,10 @@ case class UartTxDemo(
     // ----- pure UART core --------------------------------------------------
 
     val uart = UartTx(cfg)
+    uart.io.baudPhaseInc := U(
+      BaudGenerator.phaseIncFor(cfg, BaudGenerator.defaultAccWidth),
+      BaudGenerator.defaultAccWidth bits
+    )
 
     // ----- byte FIFO -------------------------------------------------------
     //
