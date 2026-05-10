@@ -129,7 +129,7 @@ aggregate and `.PHONY`.
 
 ---
 
-### 🔲 Step 3 — `BusTiming`
+### ✅ Step 3 — `BusTiming`
 
 **Goal:** turn `I2cConfig` into a named table of cycle counts the
 bit / byte controllers can read by symbol (`tHigh`, `tLow`, …)
