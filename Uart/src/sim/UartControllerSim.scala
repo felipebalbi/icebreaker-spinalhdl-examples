@@ -31,11 +31,11 @@ object UartControllerSim {
   private val CTRL = 0x00
   private val STATUS = 0x04
   private val ISR = 0x08
-  private val IER = 0x0C
+  private val IER = 0x0c
   private val TXDATA = 0x10
   private val RXDATA = 0x14
   private val BAUD = 0x18
-  private val CFG_INFO = 0x1C
+  private val CFG_INFO = 0x1c
   private val CLKFREQ = 0x20
 
   // STATUS bits.
@@ -137,7 +137,9 @@ object UartControllerSim {
           f"loopback mismatch: sent 0x$sent%02x, got 0x$got%02x"
         )
       }
-      println(s"[ok] loopback round-tripped ${testBytes.length} bytes: ${received.map("0x%02x".format(_)).mkString(", ")}")
+      println(
+        s"[ok] loopback round-tripped ${testBytes.length} bytes: ${received.map("0x%02x".format(_)).mkString(", ")}"
+      )
 
       // ----- sticky bit / RC clear semantics -----
       // No errors should be set.

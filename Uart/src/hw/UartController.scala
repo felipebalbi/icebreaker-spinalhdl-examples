@@ -66,8 +66,7 @@ import spinal.lib.bus.regif.AccessType._
   *   runtime-tunable in this version — they show up read-only in
   *   CFG_INFO).
   */
-case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = false))
-    extends Component {
+case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = false)) extends Component {
   require(
     !cfg.useCts && !cfg.useRts,
     "UartController v1 does not wire CTS/RTS; use cfg.useCts = false and cfg.useRts = false"
@@ -262,7 +261,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   val rxDataWord = RXDATA.field(
     Bits(cfg.dataBits bits),
     RO,
-    doc = "Front byte of the RX FIFO. Reading this register pops the FIFO; reads while STATUS.rx_data_avail = 0 return zero."
+    doc =
+      "Front byte of the RX FIFO. Reading this register pops the FIFO; reads while STATUS.rx_data_avail = 0 return zero."
   )
 
   rxDataWord := rxFifo.io.pop.payload
@@ -276,8 +276,7 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
     UInt(accWidth bits),
     RW,
     baudResetValue,
-    doc =
-      "phaseInc = round(baudRate * 2^24 / clkFreqHz). The RX side uses phaseInc * oversample internally."
+    doc = "phaseInc = round(baudRate * 2^24 / clkFreqHz). The RX side uses phaseInc * oversample internally."
   )
 
   // Drive both cores' baud generators from the BAUD register. RX runs
