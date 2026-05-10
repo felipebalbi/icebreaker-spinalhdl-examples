@@ -163,6 +163,11 @@ elaboration-time math — no `Component`.
   (`tSuDat`, `tHdDat`) values stay as straight round-ups from the
   spec minimum — they don't sit on the quarter-period grid.
 - `tSuSta` (setup-for-repeated-START) added — see "Divergence #3".
+- `I2cConfig.quarterPeriodCycles` switched from floor to round-up
+  (see "Divergence #4") so the achieved SCL frequency never
+  exceeds `busFreqHz`. A new `require(clkFreqHz >= busFreqHz * 4)`
+  preserves the "clock too slow for this bus" elaboration error
+  that the old `qpc >= 1` check used to provide.
 - Elaboration-time `assert`s pin the `tHigh ≥ tHighMin`,
   `tLow ≥ tLowMin`, and `tHigh + tLow ≥ 4 × quarterPeriodCycles`
   invariants for future readers.
@@ -196,6 +201,19 @@ elaboration-time math — no `Component`.
    `tHdSta` per the spec; the bit-controller (Step 4) needs it for
    repeated-START framing, and the spec table was already open in
    the file. Cheaper to add now than to revisit during Step 4.
+4. **`I2cConfig.quarterPeriodCycles` rounded *up*, not floored.**
+   The original `clkFreqHz / (busFreqHz * 4)` truncates: at 25 MHz
+   Standard mode it yields 62 instead of the ideal 62.5, giving
+   100.81 kHz on the bus instead of the requested 100 kHz —
+   nominally over-spec for a Standard-mode segment. Surfaced when
+   running `sim-bustiming` for the first time on a real toolchain.
+   Switched to ceil (`divRoundUp`) so the achieved SCL frequency
+   sits at-or-below `busFreqHz` for every (clk, busSpeed) pair.
+   Added `require(clkFreqHz >= busFreqHz * 4)` to preserve the
+   "clock too slow for this bus" elaboration error that the old
+   floor-based `quarterPeriodCycles >= 1` guard used to provide
+   (round-up always gives ≥ 1 for any positive clock, so the old
+   guard would no longer catch under-clocked configs).
 
 **Sim:**
 

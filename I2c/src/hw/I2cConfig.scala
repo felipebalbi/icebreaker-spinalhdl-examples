@@ -103,23 +103,41 @@ case class I2cConfig(
     * low phase. Counting in quarter periods gives the bit-controller a
     * cheap way to schedule all four edges with a single counter.
     *
+    * Rounded *up* (ceil) so the scheduled bit period
+    * `4 × quarterPeriodCycles` is at least `clkFreqHz / busFreqHz`
+    * cycles long — the achieved SCL frequency therefore never *exceeds*
+    * `busFreqHz`, only sits at-or-below it. Rounding the other way
+    * (truncating) would silently produce slightly-over-rate buses
+    * for clock/bus ratios that aren't integer-clean (e.g., 25 MHz at
+    * Standard mode rounds 62.5 down to 62, giving 100.81 kHz instead
+    * of 100 kHz).
+    *
     * This is intentionally the only timing constant exposed by the config
     * itself; the upcoming `BusTiming` helper will consume it and fan it
     * out into the spec-named cycle counts (`tHIGH`, `tLOW`, `tHD;STA`,
     * `tSU;STO`, `tBUF`, …) so the FSMs can read those by name.
     */
-  val quarterPeriodCycles = clkFreqHz / (busFreqHz * 4)
+  val quarterPeriodCycles = (clkFreqHz + busFreqHz * 4 - 1) / (busFreqHz * 4)
 
   // Catches accidentally-zero or negative clocks at elaboration. The math
   // below would silently produce 0 and a nonsensical design otherwise.
   require(clkFreqHz > 0)
 
-  // Without this guard an undersized system clock would round
-  // quarterPeriodCycles down to 0, synthesise happily, and never toggle
-  // SCL. Better to fail loudly at elaboration with a message that names
-  // the offending (clkFreqHz, busSpeed) pair.
+  // The clock must allow at least one cycle per quarter-period slot,
+  // otherwise the bit-controller has no room to schedule four
+  // distinct edges per bit. Equivalent to "quarterPeriodCycles >= 1
+  // before the round-up" — needed as an explicit check because
+  // round-up always gives >= 1 for any positive clkFreqHz, so the
+  // qpc >= 1 guard alone no longer catches under-clocked configs.
   require(
-    quarterPeriodCycles >= 1,
-    s"clkFreqHz=$clkFreqHz too low for $busSpeed"
+    clkFreqHz >= busFreqHz * 4,
+    s"clkFreqHz=$clkFreqHz too low for $busSpeed (need >= ${busFreqHz * 4} Hz)"
   )
+
+  // Defence-in-depth: round-up of a positive numerator and divisor is
+  // always >= 1, so this is structurally redundant once the guard
+  // above passes. Kept for the same reason the "Cannot be reached"
+  // arms in pattern matches are kept — it documents the invariant
+  // for the next reader.
+  require(quarterPeriodCycles >= 1)
 }

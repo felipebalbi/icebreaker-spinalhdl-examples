@@ -91,18 +91,30 @@ object BusTimingSim {
     )
   }
 
+  // SpinalEnumElement.toString reads its `name` field, which Spinal
+  // sets via reflection during Component construction. This sim never
+  // builds a Component, so `name` is null and `${speed}` interpolates
+  // as "null". Map to a fixed string for printing.
+  private def speedLabel(speed: BusSpeed.E): String = speed match {
+    case BusSpeed.Standard => "Standard"
+    case BusSpeed.Fast     => "Fast"
+    case BusSpeed.FastPlus => "FastPlus"
+  }
+
   private def runOne(clkFreqHz: Int, speed: BusSpeed.E): Unit = {
     val cfg = I2cConfig(clkFreqHz = clkFreqHz, busSpeed = speed)
     val t   = BusTiming(cfg)
 
     val achievedSclHz = clkFreqHz.toDouble / (t.tHigh + t.tLow).toDouble
     val stretched     = (t.tHigh + t.tLow) > 4 * cfg.quarterPeriodCycles
+    val errPct        = (achievedSclHz - cfg.busFreqHz) / cfg.busFreqHz * 100.0
 
     println(
-      f"--- $speed @ ${clkFreqHz / 1000000}%d MHz " +
+      f"--- ${speedLabel(speed)}%-9s @ ${clkFreqHz / 1000000}%2d MHz " +
         f"(qpc=${cfg.quarterPeriodCycles}, " +
-        f"busFreq=${cfg.busFreqHz / 1000}%d kHz, " +
-        f"achievedScl=${achievedSclHz / 1000}%.2f kHz, " +
+        f"busFreq=${cfg.busFreqHz / 1000}%4d kHz, " +
+        f"achievedScl=${achievedSclHz / 1000}%7.2f kHz, " +
+        f"err=${errPct}%+6.2f%%, " +
         f"stretched=$stretched)"
     )
     println(
@@ -135,11 +147,12 @@ object BusTimingSim {
       s"tHigh+tLow=${t.tHigh + t.tLow} < 4*qpc=${4 * cfg.quarterPeriodCycles}"
     )
 
-    // Achieved SCL frequency must never exceed busFreqHz (we can only
-    // drop below by stretching). 0.5 % slack absorbs the integer
-    // rounding when no stretching happens.
+    // Achieved SCL frequency must never exceed busFreqHz: I2cConfig
+    // ceils quarterPeriodCycles, and the max(...) in BusTiming can
+    // only stretch the period further. The 0.1 % slack is for IEEE-754
+    // rounding noise, not for any spec-allowed deviation.
     assert(
-      achievedSclHz <= cfg.busFreqHz.toDouble * 1.005,
+      achievedSclHz <= cfg.busFreqHz.toDouble * 1.001,
       f"achievedScl=$achievedSclHz%.2f Hz exceeds busFreqHz=${cfg.busFreqHz} Hz"
     )
   }

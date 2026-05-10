@@ -32,8 +32,14 @@ package i2c
   *     1.25 µs — a strict 50/50 schedule would make the spec
   *     unreachable at *any* system clock. Stretching `tLow` (and
   *     therefore the bit period) is the standard fix; the resulting
-  *     SCL frequency will be slightly below `busFreqHz` when this
-  *     happens, which the spec also explicitly allows.
+  *     SCL frequency drops below `busFreqHz` when this happens, which
+  *     the spec also explicitly allows.
+  *
+  * The achieved SCL frequency is `clkFreqHz / (tHigh + tLow)` and
+  * sits at-or-below `busFreqHz` for every supported config — `qpc`
+  * is rounded *up* in `I2cConfig` to guarantee the period covers at
+  * least `clkFreqHz / busFreqHz` cycles, and the `max(...)` above
+  * only ever extends it further.
   *
   * `tHigh + tLow ≥ 4 × quarterPeriodCycles` is therefore a one-way
   * invariant — equality holds only when both spec floors fit inside
