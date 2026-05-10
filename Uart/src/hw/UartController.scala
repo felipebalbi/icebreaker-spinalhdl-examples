@@ -328,7 +328,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   // datasheet) but the *effect* is hand-rolled: any write that hits
   // TXDATA's address pulses fifo.io.push.valid for one cycle.
 
-  val txDataWriteHit = busif.doWrite && (busif.writeAddress() === TXDATA.getAddr().resized)
+  val txDataWriteHit =
+    busif.doWrite && (busif.writeAddress() === U(TXDATA.getAddr(), busif.writeAddress().getWidth bits))
   txFifo.io.push.valid := txDataWriteHit
   // Pull the byte from the live bus write data rather than the stored
   // field — the field's stored value updates one cycle late, but
@@ -351,7 +352,7 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
 
   // ----- RX FIFO pop glue -------------------------------------------------
 
-  val rxDataReadHit = busif.doRead && (busif.readAddress() === RXDATA.getAddr().resized)
+  val rxDataReadHit = busif.doRead && (busif.readAddress() === U(RXDATA.getAddr(), busif.writeAddress().getWidth bits))
   rxFifo.io.pop.ready := rxDataReadHit && rxFifo.io.pop.valid
 
   // ----- IRQ aggregation --------------------------------------------------
