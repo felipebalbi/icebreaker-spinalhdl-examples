@@ -89,10 +89,10 @@ case class UartEchoDemo(
     // We don't bother with PREADY/PSLVERR (UartController doesn't drive
     // PREADY low) so each transaction is a clean 2-cycle pulse.
     //
-    // The loop is: poll STATUS → if rx_data_avail then read RXDATA into
+    // The loop is: poll RX_FIFO_STATUS → if !empty then read RXDATA into
     // a holding register and write it to TXDATA.
 
-    val statusAddr = U(0x04, 8 bits)
+    val rxFifoStatusAddr = U(0x20, 8 bits)
     val rxDataAddr = U(0x14, 8 bits)
     val txDataAddr = U(0x10, 8 bits)
 
@@ -117,7 +117,7 @@ case class UartEchoDemo(
 
       pollSetup.whenIsActive {
         uart.io.apb.PSEL := B(1)
-        uart.io.apb.PADDR := statusAddr
+        uart.io.apb.PADDR := rxFifoStatusAddr
         uart.io.apb.PWRITE := False
         goto(pollAccess)
       }
@@ -125,10 +125,10 @@ case class UartEchoDemo(
       pollAccess.whenIsActive {
         uart.io.apb.PSEL := B(1)
         uart.io.apb.PENABLE := True
-        uart.io.apb.PADDR := statusAddr
+        uart.io.apb.PADDR := rxFifoStatusAddr
         uart.io.apb.PWRITE := False
-        // STATUS bit 3 = rx_data_avail.
-        when(uart.io.apb.PRDATA(3)) {
+        // RX_FIFO_STATUS bit 1 = empty; data is available when !empty.
+        when(!uart.io.apb.PRDATA(1)) {
           goto(readRxSetup)
         } otherwise {
           goto(pollSetup)

@@ -20,35 +20,45 @@ import spinal.lib.bus.regif.AccessType._
   * cores in a register interface that mirrors the industry norm (16550 / DW /
   * STM32-style: TXDATA, RXDATA, STATUS, ISR/IER, BAUD, CONFIG) and adds:
   *
-  *   - **TX/RX FIFOs**, depth = `cfg.fifoDepth` (default 16). A brief APB
-  *     stall can no longer overrun the line.
+  *   - **TX/RX FIFOs** sized independently by `cfg.txFifoDepth` and
+  *     `cfg.rxFifoDepth` (defaults 16 each). A brief APB stall can no
+  *     longer overrun the line.
   *   - **Runtime baud**: BAUD is a writable register driving the DDS phase
   *     increment. Reset value matches `cfg.baudRate` at `cfg.clkFreqHz`.
-  *   - **Sticky errors** with W1C/RC clear semantics, so firmware never has
+  *   - **Sticky errors** with W1C clear semantics, so firmware never has
   *     to race the hardware to catch a single-cycle error pulse.
   *   - **A maskable interrupt** OR-reduced over the framing/parity/overrun
   *     events, mirroring the 16550 IIR behaviour.
   *
   * == Address map ==
   * {{{
-  *   0x00 CTRL     RW   [0]=enable [1]=tx_enable [2]=rx_enable
-  *   0x04 STATUS   RO   [0]=tx_busy [1]=tx_fifo_full [2]=tx_fifo_empty
-  *                      [3]=rx_data_avail [4]=rx_fifo_full
-  *   0x08 ISR      RC   sticky error/event flags, read clears
-  *                      [0]=framing [1]=parity [2]=overrun
-  *                      [3]=tx_done [4]=rx_done
-  *   0x0C IER      RW   per-bit enable; matches ISR layout
-  *   0x10 TXDATA   WO   write pushes one byte into TX FIFO (silently
-  *                      dropped if STATUS.tx_fifo_full is set — software
-  *                      should poll first)
-  *   0x14 RXDATA   RO   read returns the FIFO front and pops it (returns
-  *                      0 if STATUS.rx_data_avail is clear)
-  *   0x18 BAUD     RW   DDS phase increment driving BaudGenerator. Reset
-  *                      = phaseIncFor(cfg.baudRate, cfg.clkFreqHz)
-  *   0x1C CFG_INFO RO   [3:0]=dataBits-1 [5:4]=stopBits [7:6]=parity
-  *                      [11:8]=log2(oversample) [23:16]=fifoDepth
-  *   0x20 CLKFREQ  RO   cfg.clkFreqHz so software can compute a new
-  *                      phase increment for any desired baud
+  *   0x00 CTRL            RW   [0]=enable [1]=tx_enable [2]=rx_enable
+  *   0x04 STATUS          RO   [0]=tx_busy
+  *   0x08 ISR             W1C  sticky error/event flags; write 1 to clear
+  *                             [0]=framing [1]=parity [2]=overrun
+  *                             [3]=tx_done [4]=rx_done
+  *   0x0C IER             RW   per-bit enable / interrupt mask; matches
+  *                             ISR layout
+  *   0x10 TXDATA          WO   write pushes one byte into TX FIFO (silently
+  *                             dropped if TX_FIFO_STATUS.full is set —
+  *                             software should poll first)
+  *   0x14 RXDATA          RO   read returns the FIFO front and pops it
+  *                             (returns 0 if RX_FIFO_STATUS.empty is set)
+  *   0x18 BAUD            RW   DDS phase increment driving BaudGenerator.
+  *                             Reset = phaseIncFor(cfg.baudRate,
+  *                             cfg.clkFreqHz). Firmware computes the value
+  *                             from the system clock it knows it wired in;
+  *                             there is no CLKFREQ register because a wrong
+  *                             synth value would silently corrupt baud
+  *                             rates.
+  *   0x1C TX_FIFO_STATUS  RO   [0]=full [1]=empty [15:8]=count
+  *                             [23:16]=depth (synth-time capacity)
+  *   0x20 RX_FIFO_STATUS  RO   same layout as TX. `empty=1` means no byte
+  *                             is queued; firmware checks `!empty` before
+  *                             reading RXDATA.
+  *   0x24 CFG_INFO        RO   [3:0]=dataBits-1 [5:4]=stopBits [7:6]=parity
+  *                             [11:8]=log2(oversample). Per-FIFO depths
+  *                             live on the FIFO_STATUS registers, not here.
   * }}}
   *
   * == Hardware datasheet ==
@@ -62,9 +72,10 @@ import spinal.lib.bus.regif.AccessType._
   * @param cfg
   *   Compile-time UART configuration. `cfg.baudRate` and `cfg.clkFreqHz`
   *   become the *reset* values of BAUD; `cfg.dataBits`, `cfg.parity`,
-  *   `cfg.stopBits` and `cfg.fifoDepth` shape the build (they are NOT
-  *   runtime-tunable in this version — they show up read-only in
-  *   CFG_INFO).
+  *   `cfg.stopBits`, `cfg.txFifoDepth` and `cfg.rxFifoDepth` shape the
+  *   build (they are NOT runtime-tunable in this version — the format
+  *   bits show up read-only in CFG_INFO; the FIFO depths show up in the
+  *   per-side FIFO_STATUS registers).
   */
 case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = false)) extends Component {
   require(
@@ -116,12 +127,14 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   // ----- FIFOs -------------------------------------------------------------
   //
   // Both halves of the cores are Stream-shaped, so the FIFOs slot in
-  // straight on top with no handshake gymnastics. `cfg.fifoDepth` is
-  // typically 16 — the same default as a 16550 — and on UP5K BRAM
-  // budgets that's negligible.
+  // straight on top with no handshake gymnastics. `cfg.txFifoDepth` /
+  // `cfg.rxFifoDepth` are typically 16 — the same default as a 16550 —
+  // and on UP5K BRAM budgets that's negligible. Splitting them lets
+  // asymmetric workloads (e.g. burst-write logger, RX-heavy console)
+  // size each side independently.
 
-  val txFifo = StreamFifo(Bits(cfg.dataBits bits), cfg.fifoDepth)
-  val rxFifo = StreamFifo(Bits(cfg.dataBits bits), cfg.fifoDepth)
+  val txFifo = StreamFifo(Bits(cfg.dataBits bits), cfg.txFifoDepth)
+  val rxFifo = StreamFifo(Bits(cfg.dataBits bits), cfg.rxFifoDepth)
 
   rxFifo.io.push.payload := rxCore.io.payload.payload
   // rxFifo.io.push.valid and rxCore.io.payload.ready are wired further
@@ -154,6 +167,12 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   )
 
   // STATUS ----------------------------------------------------------------
+  //
+  // `STATUS` is intentionally minimal: just the live "TX line is in the
+  // middle of shipping a frame" bit. FIFO occupancy moved to the dedicated
+  // TX_FIFO_STATUS / RX_FIFO_STATUS registers further down — they each
+  // expose full / empty / count / depth in one 32-bit word so firmware
+  // can compute free-space `= depth - count` in a single read.
 
   val STATUS = busif.newReg(doc = "Status register (read-only)")
   val statusTxBusy = STATUS.field(
@@ -161,65 +180,43 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
     RO,
     doc = "Asserted while a frame is in flight on the TX line."
   )
-  val statusTxFifoFull = STATUS.field(
-    Bool(),
-    RO,
-    doc = "TX FIFO is full; further TXDATA writes are dropped silently."
-  )
-  val statusTxFifoEmpty = STATUS.field(
-    Bool(),
-    RO,
-    doc = "TX FIFO is empty (and likely the line will go idle soon)."
-  )
-  val statusRxDataAvail = STATUS.field(
-    Bool(),
-    RO,
-    doc = "At least one byte sits in the RX FIFO; reading RXDATA pops it."
-  )
-  val statusRxFifoFull = STATUS.field(
-    Bool(),
-    RO,
-    doc = "RX FIFO full; the next received byte will trigger an overrun."
-  )
 
   statusTxBusy := !txCore.io.data.ready
-  statusTxFifoFull := !txFifo.io.push.ready
-  statusTxFifoEmpty := !txFifo.io.pop.valid
-  statusRxDataAvail := rxFifo.io.pop.valid
-  statusRxFifoFull := !rxFifo.io.push.ready
 
   // ISR / IER -------------------------------------------------------------
   //
-  // Sticky-with-read-clear (RC) for ISR matches the 16550's "read LSR
-  // to clear" semantics. The streaming RxCore emits one-cycle pulses,
-  // and `.set()` on an RC field latches them into the register without
-  // racing the bus. IER (the mask) is plain RW; the OR with ISR drives
-  // the IRQ output.
+  // ISR fields are W1C: the streaming RxCore emits one-cycle event pulses,
+  // `.set()` latches them sticky into the register, and firmware clears a
+  // bit by writing 1 to it (read-only access leaves the bit alone). This
+  // supports the standard interrupt handler flow: read ISR → mask via IER
+  // → wake the bottom-half task → task processes the events and clears
+  // their ISR bits → unmask. IER is plain RW; the OR of (ISR & IER)
+  // drives the IRQ output.
 
-  val ISR = busif.newReg(doc = "Interrupt status (read-clears)")
+  val ISR = busif.newReg(doc = "Interrupt status (write 1 to clear)")
   val isrFraming = ISR.field(
     Bool(),
-    RC,
+    W1C,
     doc = "Stop bit was sampled low on at least one received frame."
   )
   val isrParity = ISR.field(
     Bool(),
-    RC,
+    W1C,
     doc = "Parity bit didn't match data parity. Only meaningful when CFG_INFO.parity != None."
   )
   val isrOverrun = ISR.field(
     Bool(),
-    RC,
+    W1C,
     doc = "RX FIFO overflowed; a byte was lost."
   )
   val isrTxDone = ISR.field(
     Bool(),
-    RC,
+    W1C,
     doc = "TX FIFO transitioned from non-empty to empty (the last queued byte completed)."
   )
   val isrRxDone = ISR.field(
     Bool(),
-    RC,
+    W1C,
     doc = "A byte was pushed into the RX FIFO."
   )
 
@@ -291,11 +288,58 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   txCore.io.baudPhaseInc := baudPhaseInc
   rxCore.io.baudPhaseInc := (baudPhaseInc << osShift).resize(accWidth bits)
 
+  // TX_FIFO_STATUS / RX_FIFO_STATUS ---------------------------------------
+  //
+  // Per-side FIFO observability, packed so firmware can pull
+  // (full, empty, count, depth) in a single 32-bit read and compute
+  // free-space `= depth - count` without a second bus turn.
+  //
+  // Layout (identical for TX and RX):
+  //   [0]      full   — push.ready is low
+  //   [1]      empty  — pop.valid is low (no byte queued)
+  //   [7:2]    reserved
+  //   [15:8]   count  — live occupancy (0..depth)
+  //   [23:16]  depth  — synth-time capacity (cfg.txFifoDepth /
+  //                     cfg.rxFifoDepth); duplicated per side because the
+  //                     two sides may be sized independently.
+
+  val TX_FIFO_STATUS = busif.newReg(doc = "TX FIFO status (read-only)")
+  val txFifoFull = TX_FIFO_STATUS.field(Bool(), RO, doc = "TX FIFO is full; further TXDATA writes are dropped silently.")
+  val txFifoEmpty = TX_FIFO_STATUS.field(Bool(), RO, doc = "TX FIFO is empty (the line will go idle once any in-flight frame finishes).")
+  TX_FIFO_STATUS.reserved(6 bits)
+  val txFifoCount = TX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Bytes currently queued in the TX FIFO (0..txFifoDepth).")
+  val txFifoDepth = TX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Synth-time TX FIFO capacity in bytes (= cfg.txFifoDepth).")
+
+  txFifoFull := !txFifo.io.push.ready
+  txFifoEmpty := !txFifo.io.pop.valid
+  txFifoCount := txFifo.io.occupancy.resize(8 bits)
+  txFifoDepth := U(cfg.txFifoDepth, 8 bits)
+
+  val RX_FIFO_STATUS = busif.newReg(doc = "RX FIFO status (read-only)")
+  val rxFifoFull = RX_FIFO_STATUS.field(Bool(), RO, doc = "RX FIFO is full; the next received byte will trigger an overrun.")
+  val rxFifoEmpty = RX_FIFO_STATUS.field(Bool(), RO, doc = "RX FIFO is empty; firmware should poll for !empty before reading RXDATA.")
+  RX_FIFO_STATUS.reserved(6 bits)
+  val rxFifoCount = RX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Bytes currently queued in the RX FIFO (0..rxFifoDepth).")
+  val rxFifoDepth = RX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Synth-time RX FIFO capacity in bytes (= cfg.rxFifoDepth).")
+
+  rxFifoFull := !rxFifo.io.push.ready
+  rxFifoEmpty := !rxFifo.io.pop.valid
+  rxFifoCount := rxFifo.io.occupancy.resize(8 bits)
+  rxFifoDepth := U(cfg.rxFifoDepth, 8 bits)
+
   // CFG_INFO --------------------------------------------------------------
   //
   // Read-only parameter window so firmware (or a Rust embedded-hal
   // driver) can introspect what the synthesiser actually wired in.
-  // None of these are tunable post-synthesis.
+  // None of these are tunable post-synthesis. FIFO depths are NOT
+  // mirrored here — they live on the per-side FIFO_STATUS registers
+  // because TX and RX may be sized independently.
+  //
+  // No CLKFREQ register: the system clock that drives BAUD is a
+  // physical/synth-time fact, not a tunable; exposing it as RO would
+  // invite firmware to trust a value that nothing actually validates.
+  // Firmware computes BAUD's phase increment from the clock tree it
+  // knows it wired in, the same way an STM32 driver computes BRR.
 
   val parityCode = cfg.parity match {
     case ParityType.None => 0
@@ -308,18 +352,11 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   val cfgInfoStopBits = CFG_INFO.field(UInt(2 bits), RO, doc = "Number of stop bits (1 or 2).")
   val cfgInfoParity = CFG_INFO.field(UInt(2 bits), RO, doc = "Parity: 0=None 1=Even 2=Odd.")
   val cfgInfoOsShift = CFG_INFO.field(UInt(4 bits), RO, doc = "log2(oversample); RX baudgen runs phaseInc << this.")
-  CFG_INFO.reserved(4 bits)
-  val cfgInfoFifoDepth = CFG_INFO.field(UInt(8 bits), RO, doc = "TX/RX FIFO depth in bytes.")
 
   cfgInfoDataBits := U(cfg.dataBits - 1, 4 bits)
   cfgInfoStopBits := U(cfg.stopBits, 2 bits)
   cfgInfoParity := U(parityCode, 2 bits)
   cfgInfoOsShift := U(osShift, 4 bits)
-  cfgInfoFifoDepth := U(cfg.fifoDepth, 8 bits)
-
-  val CLKFREQ = busif.newReg(doc = "System clock frequency in Hz (read-only)")
-  val clkFreqVal = CLKFREQ.field(UInt(32 bits), RO, doc = "clkFreqHz; firmware uses this to compute a new BAUD value.")
-  clkFreqVal := U(cfg.clkFreqHz, 32 bits)
 
   // ----- TX FIFO push glue ------------------------------------------------
   //

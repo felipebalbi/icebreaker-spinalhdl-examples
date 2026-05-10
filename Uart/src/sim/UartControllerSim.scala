@@ -9,13 +9,15 @@ import spinal.lib.bus.amba3.apb.sim.Apb3Driver
   * Drives the controller through its memory-mapped interface with a
   * software-style sequence:
   *
-  *   1. Read CFG_INFO and CLKFREQ — sanity-check the introspection
-  *      registers reflect the build parameters.
+  *   1. Read CFG_INFO and the FIFO_STATUS depth fields — sanity-check
+  *      the introspection registers reflect the build parameters.
   *   2. Enable the controller and TX/RX paths via CTRL.
   *   3. Write a handful of bytes to TXDATA, with the TX line looped
   *      back to RX in the testbench.
-  *   4. Poll STATUS.rx_data_avail and pop bytes from RXDATA, checking
+  *   4. Poll RX_FIFO_STATUS.empty and pop bytes from RXDATA, checking
   *      they round-trip unchanged.
+  *   5. Verify ISR.rx_done sticks until firmware writes 1 to clear it
+  *      (W1C semantics).
   *
   * Pure black-box: the sim never reaches inside the controller. If
   * the address decode for TXDATA / RXDATA is wrong or the FIFO push
@@ -35,15 +37,22 @@ object UartControllerSim {
   private val TXDATA = 0x10
   private val RXDATA = 0x14
   private val BAUD = 0x18
-  private val CFG_INFO = 0x1c
-  private val CLKFREQ = 0x20
+  private val TX_FIFO_STATUS = 0x1c
+  private val RX_FIFO_STATUS = 0x20
+  private val CFG_INFO = 0x24
 
-  // STATUS bits.
-  private val STATUS_TX_BUSY = 0
-  private val STATUS_TX_FIFO_FULL = 1
-  private val STATUS_TX_FIFO_EMPTY = 2
-  private val STATUS_RX_DATA_AVAIL = 3
-  private val STATUS_RX_FIFO_FULL = 4
+  // ISR / IER bit positions (mirror layout).
+  private val IRQ_FRAMING = 0
+  private val IRQ_PARITY = 1
+  private val IRQ_OVERRUN = 2
+  private val IRQ_TX_DONE = 3
+  private val IRQ_RX_DONE = 4
+
+  // FIFO_STATUS bit positions (same layout for TX and RX).
+  private val FIFO_FULL = 0
+  private val FIFO_EMPTY = 1
+  private val FIFO_COUNT_LSB = 8
+  private val FIFO_DEPTH_LSB = 16
 
   def main(args: Array[String]): Unit = {
     val cfg = UartConfig(useCts = false, useRts = false)
@@ -63,13 +72,6 @@ object UartControllerSim {
       dut.clockDomain.waitSampling(20)
 
       // ----- introspection registers -----
-      val clkFreq = apb.read(CLKFREQ)
-      assert(
-        clkFreq == BigInt(cfg.clkFreqHz),
-        s"CLKFREQ readback $clkFreq != cfg.clkFreqHz ${cfg.clkFreqHz}"
-      )
-      println(s"[ok] CLKFREQ = $clkFreq Hz")
-
       val cfgInfo = apb.read(CFG_INFO)
       println(f"[ok] CFG_INFO = 0x$cfgInfo%08x")
       // Bits [3:0] should be dataBits - 1.
@@ -77,6 +79,30 @@ object UartControllerSim {
         (cfgInfo & 0xf) == BigInt(cfg.dataBits - 1),
         s"CFG_INFO.dataBits got ${cfgInfo & 0xf}, expected ${cfg.dataBits - 1}"
       )
+
+      // FIFO depths should reflect the per-side cfg fields.
+      val txStatusReset = apb.read(TX_FIFO_STATUS)
+      val rxStatusReset = apb.read(RX_FIFO_STATUS)
+      val txDepthRb = ((txStatusReset >> FIFO_DEPTH_LSB) & 0xff).toInt
+      val rxDepthRb = ((rxStatusReset >> FIFO_DEPTH_LSB) & 0xff).toInt
+      assert(
+        txDepthRb == cfg.txFifoDepth,
+        s"TX_FIFO_STATUS.depth = $txDepthRb, expected ${cfg.txFifoDepth}"
+      )
+      assert(
+        rxDepthRb == cfg.rxFifoDepth,
+        s"RX_FIFO_STATUS.depth = $rxDepthRb, expected ${cfg.rxFifoDepth}"
+      )
+      // After reset both FIFOs must read empty (count = 0, empty = 1).
+      assert(
+        ((txStatusReset >> FIFO_EMPTY) & 1) == 1 && ((txStatusReset >> FIFO_COUNT_LSB) & 0xff) == 0,
+        s"TX FIFO not empty at reset: 0x${txStatusReset.toString(16)}"
+      )
+      assert(
+        ((rxStatusReset >> FIFO_EMPTY) & 1) == 1 && ((rxStatusReset >> FIFO_COUNT_LSB) & 0xff) == 0,
+        s"RX FIFO not empty at reset: 0x${rxStatusReset.toString(16)}"
+      )
+      println(s"[ok] FIFO_STATUS depth fields = TX:$txDepthRb RX:$rxDepthRb, both empty at reset")
 
       val baudReset = apb.read(BAUD)
       val expectedPhaseInc = BigInt(BaudGenerator.phaseIncFor(cfg, BaudGenerator.defaultAccWidth))
@@ -97,19 +123,19 @@ object UartControllerSim {
       // ----- TX/RX loopback -----
       val testBytes = Seq(0x55, 0xa5, 0x5a, 0xff, 0x00, 0x42)
 
-      // Push all bytes into TX FIFO up front; FIFO depth is 16 by default,
+      // Push all bytes into TX FIFO up front; depth is 16 by default,
       // so 6 bytes always fit.
       for (b <- testBytes) {
         // Wait if FIFO full (shouldn't happen with default depth=16).
-        var status = apb.read(STATUS)
-        while (((status >> STATUS_TX_FIFO_FULL) & 1) == 1) {
+        var txStatus = apb.read(TX_FIFO_STATUS)
+        while (((txStatus >> FIFO_FULL) & 1) == 1) {
           dut.clockDomain.waitSampling(10)
-          status = apb.read(STATUS)
+          txStatus = apb.read(TX_FIFO_STATUS)
         }
         apb.write(TXDATA, b)
       }
 
-      // Drain RX side: for each byte sent, poll until rx_data_avail and
+      // Drain RX side: for each byte sent, poll until !empty and
       // read RXDATA.
       val received = scala.collection.mutable.ArrayBuffer[Int]()
       // Generous timeout: each frame is ~ clkFreqHz/baudRate * 10 cycles.
@@ -117,8 +143,8 @@ object UartControllerSim {
       val totalTimeout = frameCycles * (testBytes.length + 4)
       var elapsed = 0
       while (received.length < testBytes.length && elapsed < totalTimeout) {
-        val st = apb.read(STATUS)
-        if (((st >> STATUS_RX_DATA_AVAIL) & 1) == 1) {
+        val rxStatus = apb.read(RX_FIFO_STATUS)
+        if (((rxStatus >> FIFO_EMPTY) & 1) == 0) {
           val b = apb.read(RXDATA).toInt & 0xff
           received += b
         } else {
@@ -141,20 +167,34 @@ object UartControllerSim {
         s"[ok] loopback round-tripped ${testBytes.length} bytes: ${received.map("0x%02x".format(_)).mkString(", ")}"
       )
 
-      // ----- sticky bit / RC clear semantics -----
-      // No errors should be set.
-      val isr = apb.read(ISR)
-      // RX-done should be set after the loopback above; reading clears it.
+      // After draining everything the RX FIFO must be empty again with count = 0.
+      val rxStatusDrained = apb.read(RX_FIFO_STATUS)
       assert(
-        (isr & (1 << 4)) != 0,
+        ((rxStatusDrained >> FIFO_EMPTY) & 1) == 1 && ((rxStatusDrained >> FIFO_COUNT_LSB) & 0xff) == 0,
+        s"RX FIFO not empty after drain: 0x${rxStatusDrained.toString(16)}"
+      )
+      println("[ok] RX FIFO empty after drain")
+
+      // ----- ISR sticky / W1C clear semantics -----
+      // RX-done should still be set (sticky); writing 1 clears it,
+      // but a plain read must NOT clear it.
+      val isr = apb.read(ISR)
+      assert(
+        (isr & (1 << IRQ_RX_DONE)) != 0,
         s"ISR.rx_done expected to be sticky after RX, got 0x${isr.toString(16)}"
       )
-      val isr2 = apb.read(ISR)
+      val isrReread = apb.read(ISR)
       assert(
-        (isr2 & (1 << 4)) == 0,
-        s"ISR.rx_done should be cleared by read, got 0x${isr2.toString(16)}"
+        (isrReread & (1 << IRQ_RX_DONE)) != 0,
+        s"ISR.rx_done was cleared by a plain read (expected W1C, not RC), got 0x${isrReread.toString(16)}"
       )
-      println("[ok] ISR.rx_done sticky-then-clear semantics verified")
+      apb.write(ISR, BigInt(1) << IRQ_RX_DONE)
+      val isrCleared = apb.read(ISR)
+      assert(
+        (isrCleared & (1 << IRQ_RX_DONE)) == 0,
+        s"ISR.rx_done should be cleared by W1C write, got 0x${isrCleared.toString(16)}"
+      )
+      println("[ok] ISR.rx_done sticky / read-preserves / W1C-clears semantics verified")
 
       println("UartControllerSim: PASS")
     }

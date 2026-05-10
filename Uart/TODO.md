@@ -33,12 +33,16 @@ needs it.
 - [x] **Hardware bring-up: end-to-end echo loop running on the
       iCEbreaker — `picocom` round-trips characters cleanly.** 🎉
 - [x] `UartController` (APB3-fronted, regif-generated register file)
-- [x] `UartConfig.fifoDepth` parameter
+- [x] `UartConfig.txFifoDepth` / `rxFifoDepth` parameters
 - [x] Runtime-tunable BAUD via DDS `phaseInc` register
 - [x] `UartEchoDemo` rebuilt on top of `UartController` + a tiny
       APB master FSM
 - [x] `make docs` target — HTML / C / JSON / RALF / RDL datasheet
       generators
+- [x] `STATUS` slim-down + dedicated `TX_FIFO_STATUS` /
+      `RX_FIFO_STATUS` registers (full/empty/count/depth)
+- [x] `ISR` fields flipped from RC to W1C; `CLKFREQ` register
+      removed
 
 ---
 
@@ -557,6 +561,80 @@ composition pattern, no new design problems — so they're explicitly
   parameters on each register/field.
 
 - **Makefile:** `sim-controller`, `gen-controller`, `docs`.
+
+### ✅ Step 12 — `UartController` register-file refinements
+
+Closeout of four coupled register-file changes that came out of
+hands-on use of the controller:
+
+1. **FIFO_STATUS split.** Peeled the four FIFO-related bits out of
+   `STATUS` into dedicated `TX_FIFO_STATUS` (0x1C) and
+   `RX_FIFO_STATUS` (0x20) registers. Each carries `[0]=full`,
+   `[1]=empty`, `[15:8]=count` (live occupancy from
+   `StreamFifo.io.occupancy`), and `[23:16]=depth` (synth-time
+   capacity, RO). Firmware can compute free-space `= depth - count`
+   in a single 32-bit read per side. STATUS now holds only
+   `[0]=tx_busy`.
+
+2. **`ISR` flipped from `RC` to `W1C`.** Read-clear competed with
+   firmware's own clearing policy: an interrupt handler that
+   wanted to "read ISR, mask via IER, wake bottom-half task, let
+   the task clear" couldn't, because the very read in step 1
+   destroyed the sticky state. W1C puts firmware in charge.
+   Hardware-side `.set()` calls and the IER mask logic are
+   unchanged; the only behavioural delta is that a plain read no
+   longer clears anything.
+
+3. **Removed `CLKFREQ` register.** It was misleading — `cfg.clkFreqHz`
+   is a synth-time constant baked into BAUD's reset value, but
+   exposing it as RO implied firmware could trust it for divider
+   math when nothing actually validated the synth value. Mirrors
+   the STM32 BRR pattern: firmware tracks the clock tree itself
+   and computes BAUD's phase increment.
+
+4. **`UartConfig.fifoDepth` split into `txFifoDepth` /
+   `rxFifoDepth`.** Asymmetric workloads (burst-write logger,
+   RX-heavy console) can size the two halves independently.
+   Removed `cfgInfoFifoDepth` from CFG_INFO since the depth lives
+   on each per-side FIFO_STATUS register now. Added `<= 255`
+   guards on each field so the 8-bit `depth` slot can't overflow.
+
+**Files changed:**
+- `src/hw/UartConfig.scala` — `fifoDepth` → `txFifoDepth` +
+  `rxFifoDepth`; new require guards.
+- `src/hw/UartController.scala` — STATUS slim-down; two new
+  FIFO_STATUS registers; RC→W1C on the five ISR fields; CLKFREQ
+  removed; `cfgInfoFifoDepth` removed; per-side StreamFifo
+  depths; address-map scaladoc + ISR comment block updated.
+- `src/hw/UartEchoDemo.scala` — APB master polls
+  `RX_FIFO_STATUS[1]` (inverted = data-available) instead of
+  `STATUS[3]`.
+- `src/sim/UartControllerSim.scala` — new register offset
+  constants; CLKFREQ readback dropped; FIFO_STATUS depth/empty
+  assertions added; sticky-clear test rewritten to W1C semantics
+  ("read; assert sticky; read again; assert still sticky;
+  W1C-write; read; assert cleared").
+- `README.md` — knobs table updated for the FIFO depth split.
+
+**Updated address map:**
+```
+0x00 CTRL            RW
+0x04 STATUS          RO   [0]=tx_busy
+0x08 ISR             W1C  framing/parity/overrun/tx_done/rx_done
+0x0C IER             RW   per-bit interrupt mask (mirrors ISR)
+0x10 TXDATA          WO
+0x14 RXDATA          RO
+0x18 BAUD            RW   DDS phase increment
+0x1C TX_FIFO_STATUS  RO   [0]=full [1]=empty [15:8]=count [23:16]=depth
+0x20 RX_FIFO_STATUS  RO   same layout as TX
+0x24 CFG_INFO        RO   dataBits / stopBits / parity / oversample
+                          (no fifoDepth — lives on each FIFO_STATUS)
+                          (no CLKFREQ register at all)
+```
+
+**Sim:** `make sim-controller`. Same loopback as Step 11; new
+assertions cover the FIFO depth/empty fields and the W1C clear
+behaviour.
 
 ---
 

@@ -138,21 +138,24 @@ FPGA.
 
 ## Knobs
 
-Edit `cfg` (and optionally `fifoDepth`) in `UartEchoDemo.scala`
-(or `UartTxDemo.scala` for the TX-only demo):
+Edit `cfg` (and optionally `fifoDepth` for `UartTxDemo`, or
+`txFifoDepth` / `rxFifoDepth` in `UartConfig` for the
+controller-based echo demo):
 
-| Parameter    | Where           | Effect                                                                      |
-|--------------|-----------------|-----------------------------------------------------------------------------|
-| `clkFreqHz`  | `UartConfig`    | System clock frequency in Hz (12 MHz for iCEbreaker).                       |
-| `baudRate`   | `UartConfig`    | Line rate in bits/s. DDS gets ppm-level accuracy regardless of clock match. |
-| `dataBits`   | `UartConfig`    | 5..9 (8 is the universal default).                                          |
-| `stopBits`   | `UartConfig`    | 1 or 2.                                                                     |
-| `parity`     | `UartConfig`    | None / Even / Odd. Adds a parity slot to the frame when not None.           |
-| `oversample` | `UartConfig`    | RX-only sample rate per bit (16 is industry standard).                      |
-| `useCts`     | `UartConfig`    | TX: expose a CTS pin and gate frame starts on it. Off in the echo demo.     |
-| `useRts`     | `UartConfig`    | RX: expose an RTS pin mirroring `payload.ready`. Off in the echo demo.      |
-| `message`    | `UartTxDemo`    | ASCII string streamed in a loop. Use `\r\n` for terminal line endings.      |
-| `fifoDepth`  | `UartTxDemo` / `UartEchoDemo` | Bytes buffered between producer and `UartTx` (or RX→TX).      |
+| Parameter     | Where        | Effect                                                                      |
+|---------------|--------------|-----------------------------------------------------------------------------|
+| `clkFreqHz`   | `UartConfig` | System clock frequency in Hz (12 MHz for iCEbreaker).                       |
+| `baudRate`    | `UartConfig` | Line rate in bits/s. DDS gets ppm-level accuracy regardless of clock match. |
+| `dataBits`    | `UartConfig` | 5..9 (8 is the universal default).                                          |
+| `stopBits`    | `UartConfig` | 1 or 2.                                                                     |
+| `parity`      | `UartConfig` | None / Even / Odd. Adds a parity slot to the frame when not None.           |
+| `oversample`  | `UartConfig` | RX-only sample rate per bit (16 is industry standard).                      |
+| `useCts`      | `UartConfig` | TX: expose a CTS pin and gate frame starts on it. Off in the echo demo.     |
+| `useRts`      | `UartConfig` | RX: expose an RTS pin mirroring `payload.ready`. Off in the echo demo.      |
+| `txFifoDepth` | `UartConfig` | Depth of the TX FIFO inside `UartController`. Independent from RX side.     |
+| `rxFifoDepth` | `UartConfig` | Depth of the RX FIFO inside `UartController`. Independent from TX side.     |
+| `message`     | `UartTxDemo` | ASCII string streamed in a loop. Use `\r\n` for terminal line endings.      |
+| `fifoDepth`   | `UartTxDemo` | Bytes buffered between the message ROM and `UartTx`.                        |
 
 ## Hardware
 
