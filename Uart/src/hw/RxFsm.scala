@@ -109,11 +109,15 @@ import spinal.lib.fsm._
   *     hasn't fired the Stream handshake yet, so we have nowhere to put the
   *     new byte.
   *
-  * All three are *one-cycle pulses*: they go high the cycle the FSM
-  * transitions back to `idleState`, and the next cycle (whenIsActive of
-  * idleState) clears them. By contrast, `valid` is sticky-until-fire. A
-  * consumer that wants to observe an error must do so on the cycle of the
-  * transition — typically by latching them on `valid`.
+  * All three are *one-cycle combinational pulses*: they go high in the
+  * exact cycle the FSM detects the condition (the same cycle as the
+  * `goto(idleState)` for framing/parity, or the cycle the new frame's
+  * stop bit verifies for overrun). They fall back to `False` the next
+  * cycle on their own — there is no register stage and no idle-state
+  * clear. By contrast, `valid` is sticky-until-fire. A consumer that
+  * needs to observe an error must either latch it on the same cycle
+  * (e.g. by sampling alongside `valid`) or push it into a sticky
+  * upstream register such as the regif RC field in `UartController`.
   *
   * ==Parity==
   *
@@ -161,22 +165,23 @@ case class RxFsm(cfg: UartConfig) extends Component {
     val payload = master Stream (Bits(cfg.dataBits bits))
 
     /** One-cycle pulse the cycle a frame ends with the stop bit observed
-      * low. The frame is dropped (no `valid` pulse). Latch this on
-      * `valid` rising if you want to observe it from a slow consumer.
+      * low. The frame is dropped (no `valid` pulse). Slow consumers
+      * should latch this into a sticky register — `UartController`
+      * does so via its regif RC field.
       */
     val framingError = out Bool ()
 
     /** One-cycle pulse the cycle a frame ends with the parity bit
       * mismatched against the accumulated XOR-of-data. The frame is
       * dropped (no `valid` pulse). Only ever fires when
-      * `cfg.parity != ParityType.None`.
+      * `cfg.parity != ParityType.None`. Latch as for `framingError`.
       */
     val parityError = out Bool ()
 
     /** One-cycle pulse the cycle a fresh frame's stop bit verifies while a
       * previous frame's payload has not yet been consumed. The new byte is
       * emitted on `valid` (and the previous one is lost — see the review
-      * notes in TODO.md).
+      * notes in TODO.md). Latch as for `framingError`.
       */
     val overrun = out Bool ()
 
@@ -188,16 +193,21 @@ case class RxFsm(cfg: UartConfig) extends Component {
   }
 
   // --------------------------------------------------------------------------
-  // Error / status registers.
+  // Error / status flags.
   //
-  // All three are one-cycle pulses: set in the cycle of a state
-  // transition to idleState, cleared the next cycle by idleState's
-  // whenIsActive. Their values are only meaningful when latched on
-  // a separate `valid`-related event by the consumer.
+  // Combinational one-cycle pulses, NOT registers. Default to False
+  // here; each error's detection arm in the FSM overrides with True
+  // for that one cycle. Sticky behaviour is the consumer's job —
+  // UartController's regif RC fields latch them with `.set()`.
+  //
+  // Earlier versions of this file used `Reg(Bool())` plus an
+  // idleState-driven clear. That defeated W1C/RC semantics upstream:
+  // a fresh error during the held-high window was masked because the
+  // level was already high. Pulses fix that.
   // --------------------------------------------------------------------------
-  val framingErrorReg = Reg(Bool()) init (False)
-  val parityErrorReg = Reg(Bool()) init (False)
-  val overrunReg = Reg(Bool()) init (False)
+  val framingError = False
+  val parityError = False
+  val overrun = False
 
   // --------------------------------------------------------------------------
   // Timing counters.
@@ -272,13 +282,6 @@ case class RxFsm(cfg: UartConfig) extends Component {
     // ---------------- Idle --------------------------------------------------
     val idleState: State = new State with EntryPoint {
       whenIsActive {
-        // Clear last frame's error pulses one cycle after they were
-        // raised. See the Scaladoc for the (deliberate) asymmetry
-        // with `payloadValidReg`.
-        overrunReg := False
-        parityErrorReg := False
-        framingErrorReg := False
-
         // Edge detect: SpinalHDL's `.fall` is a one-cycle high signal
         // when `io.rx` was high last cycle and is low this cycle.
         // io.rx is already in our clock domain (it's the output of
@@ -420,7 +423,7 @@ case class RxFsm(cfg: UartConfig) extends Component {
               // Parity mismatch — flag it, drop the frame, return
               // to idle. payloadValidReg is left untouched: this
               // frame's bytes are lost.
-              parityErrorReg := True
+              parityError := True
               goto(idleState)
             }
           } otherwise {
@@ -452,7 +455,7 @@ case class RxFsm(cfg: UartConfig) extends Component {
               // Stop bit was low — framing is broken. Flag, drop,
               // return to idle. As with parity errors, no `valid`
               // pulse for this frame.
-              framingErrorReg := True
+              framingError := True
               goto(idleState)
 
             } otherwise {
@@ -469,7 +472,7 @@ case class RxFsm(cfg: UartConfig) extends Component {
                   // TODO.md review notes — current behaviour
                   // differs from the more conventional "drop new,
                   // keep old".)
-                  overrunReg := True
+                  overrun := True
                 } otherwise {
                   // Normal completion — raise valid for the new
                   // byte. The consumer fires the handshake to
@@ -501,9 +504,9 @@ case class RxFsm(cfg: UartConfig) extends Component {
 
   io.payload.payload := rsr.io.data
   io.payload.valid := payloadValidReg
-  io.framingError := framingErrorReg
-  io.parityError := parityErrorReg
-  io.overrun := overrunReg
+  io.framingError := framingError
+  io.parityError := parityError
+  io.overrun := overrun
 
   // `busy` is "anything that isn't Idle". Same idiom as TxFsm —
   // single source of truth, immune to "I added a state and forgot
