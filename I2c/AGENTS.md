@@ -14,6 +14,59 @@ The current bring-up status lives in `TODO.md`:
 Step numbering is **sequential across phases** starting at Step 1
 (`I2cConfig`), not reset per phase.
 
+The Phase-1 top, `I2cController`, is the **APB3-fronted
+register-mapped wrapper** that mirrors `Uart/src/hw/UartController.scala`.
+The streaming cores (`I2cBitController`, `I2cByteController`) stay
+Stream-shaped; regif lives in the wrapper. See "Register-file
+convention" below.
+
+## Register-file convention (mirror Uart)
+
+Every IP in this repo follows the same address-map skeleton at
+offset 0x00, established by `UartController` and adopted by
+`I2cController`:
+
+```
+0x00 REVISION       RO   IP version, sourced from the Makefile
+0x04 CTRL           RW   master enable + per-engine enables
+0x08 STATUS         RO   live status bits
+0x0C ISR            W1C  sticky errors / events; write 1 to clear
+0x10 IER            RW   per-bit interrupt enable; matches ISR
+... command / data registers ...
+... runtime-tunable timing register (BAUD on Uart, PRESCALE on I2c)
+... per-FIFO *_FIFO_STATUS registers
+... CFG_INFO        RO   build-time parameters (bus_speed, addr_mode, ...)
+```
+
+Specifics:
+
+- **REVISION at 0x00 is mandatory.** Copy
+  `Uart/src/hw/Revision.scala` into the IP's `src/hw/`, change
+  the `package` line, and stamp the values in via the Makefile
+  (see below). Per the top-level no-cross-project-deps rule
+  this is an intentional copy, not a shared module.
+- **Layout is "version-shaped":** `[31:24]=major [23:16]=minor
+  [15:0]=patch`. regif allocates fields bit-0-up so declare
+  `revPatch (16 bits)` → `revMinor (8)` → `revMajor (8)` to land
+  at those slots. A hex dump then reads "0.1.0 → 0x0001_0000".
+- **Makefile → Scala plumbing** uses JVM system properties
+  (no codegen, no extra tooling). The Makefile defines
+  `REVISION_{MAJOR,MINOR,PATCH}` plus
+  `REVISION_DEFS := -Drevision.major=$(REVISION_MAJOR) ...` and
+  redefines `SBT := sbt $(REVISION_DEFS)`. The Scala side
+  reads `sys.props.getOrElse("revision.major", "0").toInt` with
+  defaults that **must stay in lockstep** with the Makefile (so
+  a bare `sbt runMain ...` outside Make still produces the
+  canonical version).
+- **ISR fields are W1C** (sticky on event-pulse `set()`, cleared
+  by writing 1). `IER` is plain RW. `irq = OR(ISR & IER) &
+  CTRL.enable`.
+- **`make docs`** runs the controller's `*Docs` `runMain`
+  entrypoint and dumps HTML / C header / JSON / RALF /
+  SystemRDL into `gen/`. `make gen-controller` dumps just the
+  Verilog. Both targets land alongside the controller in its
+  own step.
+
 ## Open-drain primitive: `ReadableOpenDrain`, not `TriState`
 
 Every I²C wire (`scl`, `sda`) uses

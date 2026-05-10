@@ -6,6 +6,14 @@ sim'd, then composed into a wrapper, then a demo top, then real
 silicon. Order isn't load-bearing — adjust as the design teaches us
 something.
 
+The Phase-1 top, `I2cController`, is the **APB3-fronted
+register-mapped wrapper** around the Stream-shaped streaming cores
+— a direct mirror of how `UartController` wraps `UartTx` / `UartRx`
+in the sibling project. The register-file skeleton (REVISION at
+0x00, then CTRL → STATUS → ISR/IER → CMD/TXDATA/RXDATA →
+PRESCALE → *_FIFO_STATUS → CFG_INFO) is the convention every IP
+in this repo follows.
+
 Each completed step gets a "What landed" entry so the design rationale
 survives independently of the source.
 
@@ -411,49 +419,190 @@ val io = new Bundle {
 
 ---
 
-### 🔲 Step 6 — `I2cController`
+### 🔲 Step 6 — `I2cController` (APB3-fronted register-mapped wrapper)
 
-**Goal:** the public top-level Stream-fed controller. Mirrors the
-shape of `UartTx` / `UartRx` so anyone who has wired up the UART
-project can wire this one up by analogy.
+**Goal:** the Phase-1 top. An APB3 slave that wraps
+`I2cByteController` in TX / RX FIFOs, sticky errors, an aggregated
+IRQ, runtime-tunable bit timing, and a regif-generated register
+file that doubles as machine-readable documentation. **Direct
+mirror of `UartController`** in the sibling Uart project — same
+skeleton (REVISION → CTRL → STATUS → ISR/IER → CMD / TXDATA /
+RXDATA → PRESCALE → *_FIFO_STATUS → CFG_INFO), same regif idioms,
+same `make docs` flow.
 
-**File:** `src/hw/I2cController.scala`
+**Files:**
+- `src/hw/I2cController.scala` — the wrapper Component.
+- `src/hw/Revision.scala` — **copy from `Uart/src/hw/Revision.scala`**,
+  package changed to `i2c`. Per the AGENTS.md no-cross-project-deps
+  rule, this is an intentional copy. Same `(major, minor, patch)`
+  read out of `sys.props` with 0/1/0 defaults; same lockstep
+  requirement with the Makefile.
+- `src/hw/I2cControllerVerilog.scala` — `runMain` entrypoint for
+  `make gen-controller`.
+- `src/hw/I2cControllerDocs.scala` — `runMain` entrypoint for
+  `make docs` (HTML / C header / JSON / RALF / SystemRDL).
+- `src/sim/I2cControllerSim.scala` — APB-driven smoke test.
+
+**`I2cConfig` additions (land with this step):**
+- `txFifoDepth: Int = 16` — TXDATA FIFO depth.
+- `rxFifoDepth: Int = 16` — RXDATA FIFO depth.
+- (No `cmdFifoDepth`. CMD is a 1-deep shadow register, see below.)
+
+**Address map (locked here; this is the contract Step 6 has to
+deliver):**
+```
+0x00 REVISION         RO   [31:24]=major [23:16]=minor [15:0]=patch
+0x04 CTRL             RW   [0]=enable
+                           [1]=cmd_enable      drain CMD into byte-ctrl
+                           [2]=rx_enable       push read bytes into RX FIFO
+                           [3]=stretch_enable  honour clock-stretching path
+                                               (only when cfg.useClockStretching
+                                                = true; otherwise tied to 0)
+0x08 STATUS           RO   [0]=bus_busy        live (controller mid-transaction)
+                           [1]=cmd_busy        a CMD is queued / in flight;
+                                               firmware must wait for this to
+                                               fall before writing CMD again
+                           [2]=arb_lost_live   live arbitration-loss line
+                                               (sticky copy in ISR)
+0x0C ISR              W1C  sticky event/error flags; write 1 to clear
+                           [0]=addr_nack       target NACKed address phase
+                           [1]=data_nack       target NACKed a data byte
+                           [2]=arb_lost        we lost arbitration
+                           [3]=stretch_timeout future-proof; tied to 0 in v0.1
+                           [4]=cmd_done        CMD retired (byte-ctrl finished)
+                           [5]=cmd_overrun     CMD was written while cmd_busy=1;
+                                               the new write was dropped
+                           [6]=rx_done         a byte was pushed into RX FIFO
+0x10 IER              RW   per-bit enable / interrupt mask; matches ISR
+0x14 CMD              WO   write posts ONE byte-command to the controller. CMD
+                           is a 1-deep shadow register, NOT a FIFO — firmware
+                           polls STATUS.cmd_busy (or waits for ISR.cmd_done)
+                           between writes. Writes while cmd_busy=1 are
+                           silently dropped and ISR.cmd_overrun is set.
+                           [2:0]=kind          0=AddrWrite 1=AddrRead 2=WriteData
+                                               3=ReadData 4=RepStart 5=Stop
+                           [3]=ack_out         master ACK polarity for ReadData
+                                               (0=ACK and continue,
+                                                1=NACK before STOP)
+                           [4]=use_txdata      1 = pop a byte from the TXDATA
+                                               FIFO on AddrWrite/WriteData;
+                                               0 = use the inline byte field.
+                           [15:8]=byte         inline data byte (ignored if
+                                               use_txdata=1 or kind ∈
+                                               {ReadData, RepStart, Stop})
+0x18 TXDATA           WO   write pushes one byte into the TX-data FIFO. Sized
+                           by cfg.txFifoDepth so firmware can pre-load a burst
+                           payload, then issue WriteData CMDs with
+                           use_txdata=1.
+0x1C RXDATA           RO   read returns the front of the RX FIFO and pops it
+                           (returns 0 if RX_FIFO_STATUS.empty=1). Sized by
+                           cfg.rxFifoDepth.
+0x20 PRESCALE         RW   runtime override of BusTiming. Reset value =
+                           cfg.quarterPeriodCycles. Writing remaps every
+                           cycle count downstream proportionally so firmware
+                           can re-tune SCL after the fact (the same role
+                           BAUD plays for the UART). Width = 16 bits.
+0x24 TX_FIFO_STATUS   RO   [0]=full [1]=empty [15:8]=count [23:16]=depth
+0x28 RX_FIFO_STATUS   RO   same layout, for RXDATA bytes
+0x2C CFG_INFO         RO   [1:0]=bus_speed (0=Std 1=Fast 2=Fast+)
+                           [2]=addr_mode (0=7-bit 1=10-bit)
+                           [3]=use_clock_stretching
+                           [11:4]=reserved
+                           [23:16]=clkFreqHz / 1_000_000 (synth clock in MHz)
+```
 
 **Suggested IO:**
 ```scala
+val apb3Config = Apb3Config(addressWidth = 8, dataWidth = 32,
+                            selWidth = 1, useSlaveError = false)
+
 val io = new Bundle {
-  val cmd = slave  Stream ByteCmd()  // identical to byte-controller cmd
-  val rsp = master Stream ByteRsp()
-  val bus = master(I2cIo())
+  val apb = slave(Apb3(apb3Config))
+  val bus = master(I2cIo())              // open-drain SCL/SDA
+  val irq = out Bool()                   // OR(ISR & IER) when CTRL.enable = 1
 }
 ```
 
 **Design notes:**
-- **Thin wrapper.** This block exists to be the place demos
-  instantiate. It owns a `BusTiming(cfg)`, an `I2cByteController`
-  and (when `useClockStretching`) a CDC-friendly synchroniser on
-  `bus.scl.sample`. No new state machine of its own.
-- **Pin out `I2cIo`.** Demo tops directly attach
-  `io.bus.scl.ctrl.{write, writeEnable, read}` and
-  `io.bus.sda.ctrl.{...}` to the iCE40 `inout` pins. This is the
-  one and only place in the project where bus naming matters for
-  external Verilog interop.
-- No clock domain crossings inside this block beyond the SCL
-  synchroniser; producer/consumer FIFOs (if any) live in the
-  demo, like the Uart project does for `UartTxDemo`.
+
+- **Why CMD is a single shadow register, not a FIFO.** A queue of
+  pending byte-commands would be easy enough to add but it isn't
+  load-bearing — the I²C wire is the rate limiter (~25 µs per
+  byte at 100 kHz, ~2.5 µs at 1 MHz). The few hundred nanoseconds
+  of firmware overhead between CMD writes is invisible at any
+  spec speed. A 1-deep shadow keeps the address map small,
+  removes a third FIFO_STATUS register, and makes back-pressure
+  semantics obvious: `STATUS.cmd_busy` is the gate; writes while
+  busy fail loudly via `ISR.cmd_overrun` rather than being
+  silently re-queued.
+- **Why split CMD and TXDATA.** One CMD = one byte-command, but a
+  burst write naturally has N data bytes. Firmware preloads
+  TXDATA (default 16-deep), then issues WriteData CMDs with
+  `use_txdata=1`; each CMD pops the next TXDATA byte. The
+  alternative (a single packed CMD) would force one bus-write
+  per byte even when firmware already has the payload in hand.
+  This is the OpenCores i2c_master_top split.
+- **Inline byte in CMD** is the single-byte fast path. Address
+  bytes (1 byte per transaction) and most one-shot register pokes
+  fit. Set `use_txdata=0` and the byte field carries the value;
+  no need to involve the TXDATA FIFO at all.
+- **PRESCALE** is the user-tunable runtime knob the BusTiming
+  review identified. `cfg.quarterPeriodCycles` becomes the *reset*
+  value of PRESCALE; downstream timing is computed from PRESCALE,
+  not from `cfg.quarterPeriodCycles` directly. This is what gives
+  firmware the lever to recover the residual SCL frequency error
+  on awkward clock/bus ratios (e.g., 25 MHz × Fast+ → 10.7 % off
+  with the cfg-derived value alone).
+- **Sticky errors / W1C** match the Uart pattern exactly. The
+  byte-controller emits one-cycle `addrNack` / `dataNack` /
+  `arbLost` / `stretchTimeout` pulses; `.set()` latches each into
+  the matching ISR field; firmware clears by writing 1.
+- **IRQ** = `OR(ISR & IER) & CTRL.enable`. Same shape as Uart.
+- **Sub-block instantiation:** one `BusTiming(cfg)`, one
+  `I2cByteController(cfg)`, two `StreamFifo`s (TX-data, RX-data),
+  the regif `Apb3BusInterface`, the CMD shadow register and the
+  `cmd_busy` FSM that drives `byteCtrl.io.cmd.valid`.
+- **Demo entrypoints:** `I2cControllerVerilog` and
+  `I2cControllerDocs` `object`s with `main(args)`. `Docs` runs
+  `accept(DocHtml(...))` / `DocCHeader` / `DocJson` / `DocRalf` /
+  `DocSystemRdl` — same lineup as `UartControllerDocs`.
 
 **Sim hints (`src/sim/I2cControllerSim.scala`):**
-- Sweep matrix using the `BehaviouralTargetMock`:
-  - 7-bit write of N bytes;
-  - 7-bit read of N bytes;
-  - write-then-read with `RepStart`;
-  - ack-poll loop (repeated `AddrWrite` until ACK, modelling the
-    EEPROM-write-cycle wait pattern);
-  - NACK on address.
-- Assert `rsp` order and flag bits match the producer's
-  expectations on a per-transaction basis.
+- Mirror `UartControllerSim` closely:
+  - First check after reset: read REVISION, decode `(major,
+    minor, patch)`, assert vs. `Revision.{major, minor, patch}`.
+    Locks the Makefile→sys.props→regif plumbing.
+  - Read CFG_INFO; assert it reports the build params.
+  - Read TX/RX_FIFO_STATUS depth fields; assert they match
+    `cfg.{tx,rx}FifoDepth`.
+- Compose the controller against a Scala-side
+  `BehaviouralTargetMock` (built in Step 5) on a shared `I2cIoBus`.
+- Cases:
+  - **Single-byte register write** via inline CMD bytes: AddrWrite
+    (use_txdata=0, byte=slave addr) → WriteData (use_txdata=0,
+    byte=reg) → WriteData → Stop. Assert mock register file.
+  - **Burst write via TXDATA**: preload TXDATA with N bytes;
+    issue AddrWrite + N × WriteData(use_txdata=1) + Stop; assert
+    mock received the bytes in order.
+  - **Read with RepStart**: AddrWrite(reg) → RepStart →
+    AddrRead(slave) → ReadData(ack=continue) → ReadData(ack=nack) →
+    Stop. Pop RXDATA twice; assert bytes.
+  - **NACK on address**: target answers a wrong address. Assert
+    `ISR.addr_nack` sets and stays sticky until W1C clears it.
+  - **CMD overrun**: deliberately write CMD twice back-to-back
+    while `cmd_busy=1`. Assert the second write is dropped, the
+    bus traffic only contains the first command, and
+    `ISR.cmd_overrun` sets.
+  - **PRESCALE retune**: write a different value, assert the
+    on-bus SCL period changes accordingly.
 
-**Makefile:** `sim-controller` target.
+**Makefile:**
+- `sim-controller` target.
+- `gen-controller` target (`runMain i2c.I2cControllerVerilog`).
+- `docs` target (`runMain i2c.I2cControllerDocs`).
+- All hooked into the `## help` line and `.PHONY`.
+- `REVISION_DEFS` (already present from the planning pass) is
+  forwarded automatically because `SBT := sbt $(REVISION_DEFS)`.
 
 ---
 
@@ -478,6 +627,11 @@ uart_tx     -> output (USB-UART TXD on the iCEbreaker)
 ```
 
 **Design notes:**
+- **APB master FSM in the demo.** The controller now exposes
+  Apb3, not a Stream — so the demo owns a small APB master FSM
+  that walks the register file (write CTRL.enable, write CMD,
+  poll STATUS.cmd_busy, ...) the way `UartEchoDemo` does. Reuse
+  that FSM shape; it's already proven.
 - **Pick one target part.** Recommend MCP9808 (temperature
   sensor) over SSD1306: MCP9808 has a tiny driver footprint
   (one register read returns the temperature), SSD1306 needs an
@@ -490,9 +644,9 @@ uart_tx     -> output (USB-UART TXD on the iCEbreaker)
   inline-copy with an "imported from Uart project, sync forward
   if Uart changes" comment header. Keeps the I2c project
   buildable with `sbt` in isolation.
-- **Driver shape.** A small ROM of `ByteCmd` words feeds
-  `I2cController.io.cmd`; `io.rsp.data` bytes go to a
-  byte-to-hex-ASCII converter and out the UART. Reuse the
+- **Driver shape.** A small ROM of `(addr, data, kind)` triples
+  feeds the APB master FSM; bytes read from `RXDATA` go to a
+  byte-to-hex-ASCII converter and out the local UART. Reuse the
   Uart project's "drain a ROM through a Stream" pattern.
 - **Reset:** debounced active-low button; after reset, kick off
   one MCP9808 read every ~500 ms (a counter reset, not a fancy
@@ -700,6 +854,11 @@ led[0..2]   -> output (target matched, last-write-byte LSB, error)
   Because both speak `I2cIo`, the wired-AND happens correctly
   in silicon via the external pull-ups; no `I2cIoBus` Scala
   helper involved.
+- **Controller side is APB-driven now.** Same APB master FSM
+  shape as Step 7 — small ROM of (offset, data, kind) triples
+  walks the controller's register file. The target side stays
+  Stream-shaped per Step 10 (an APB-fronted target is a future
+  exercise; keeping it Stream-fed is fine for the loopback gate).
 - **Tiny memory behind the target.** 16-byte register file
   driven by `I2cTarget.rx` / `tx`. The controller writes a
   pattern, then reads it back; LEDs / UART report PASS / FAIL.

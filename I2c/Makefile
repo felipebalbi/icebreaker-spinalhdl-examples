@@ -6,8 +6,21 @@ GEN_DIR  := gen
 SIM_DIR  := simWorkspace
 PCF      := icebreaker.pcf
 
+# IP revision -- single source of truth for the REVISION register
+# at offset 0x00 of I2cController. Threaded into every sbt invocation
+# that elaborates the controller (REVISION_DEFS below) and read on the
+# Scala side via sys.props in `src/hw/Revision.scala` (lands with
+# Step 6, copied from the Uart project). Keep the defaults there in
+# lockstep with these values.
+REVISION_MAJOR := 0
+REVISION_MINOR := 1
+REVISION_PATCH := 0
+REVISION_DEFS  := -Drevision.major=$(REVISION_MAJOR) \
+                  -Drevision.minor=$(REVISION_MINOR) \
+                  -Drevision.patch=$(REVISION_PATCH)
+
 # Tools
-SBT     := sbt
+SBT     := sbt $(REVISION_DEFS)
 YOSYS   := yosys
 NEXTPNR := nextpnr-ice40
 ICEPACK := icepack
@@ -64,6 +77,21 @@ sim-i2cio: ## Run I2cIo (wired-AND bus model) simulation
 sim-bustiming: ## Run BusTiming (pure-Scala spec-floor audit) simulation
 	$(SBT) -batch "runMain $(PACKAGE).BusTimingSim"
 
+# The next three targets fail until Step 6 (I2cController) ships --
+# the Scala entrypoints (I2cControllerSim, I2cControllerVerilog,
+# I2cControllerDocs) don't exist yet. They're declared here so the
+# build contract for Step 6 is locked in: that's what the controller
+# step has to deliver, and `make help` advertises them in advance.
+
+sim-controller: ## Run I2cController APB-driven simulation (lands with Step 6)
+	$(SBT) -batch "runMain $(PACKAGE).I2cControllerSim"
+
+gen-controller: | $(GEN_DIR) ## Generate I2cController.v in gen/ (lands with Step 6)
+	$(SBT) -batch "runMain $(PACKAGE).I2cControllerVerilog"
+
+docs: | $(GEN_DIR) ## Generate IP datasheet (HTML / C / JSON / RALF / RDL) in gen/ (lands with Step 6)
+	$(SBT) -batch "runMain $(PACKAGE).I2cControllerDocs"
+
 waves: ## Open the most recent simulation VCD in gtkwave
 	@vcd=$$(find $(SIM_DIR) -name '*.vcd' -printf '%T@ %p\n' 2>/dev/null \
 		| sort -nr | head -1 | cut -d' ' -f2-); \
@@ -88,4 +116,4 @@ help: ## Show this help (every target with a ## description)
 		/^[a-zA-Z0-9_.-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' \
 		$(MAKEFILE_LIST)
 
-.PHONY: all sim sim-i2cio sim-bustiming waves flash clean distclean help
+.PHONY: all sim sim-i2cio sim-bustiming sim-controller gen-controller docs waves flash clean distclean help

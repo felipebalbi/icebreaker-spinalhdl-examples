@@ -5,7 +5,9 @@ the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
 Status: **Phase 0 complete** — `I2cConfig`, `I2cIo`, and `BusTiming`
-have all landed with sims. Next up is `I2cBitController`. See
+have all landed with sims. Phase 1 builds an APB3-fronted
+`I2cController` (mirror of `UartController` in the sibling project)
+on top of `I2cBitController` and `I2cByteController`. See
 `TODO.md` for the full bring-up plan.
 
 ## What's in scope
@@ -46,6 +48,31 @@ I2c/
     hw/              synthesizable code
     sim/             SpinalSim testbenches
 ```
+
+## Register layout (planned)
+
+The Phase-1 `I2cController` is APB3-fronted with the same address-map
+skeleton every IP in this repo follows (see `Uart/src/hw/UartController.scala`
+for the established blueprint):
+
+```
+0x00 REVISION       RO   IP version (major.minor.patch), sourced from Makefile
+0x04 CTRL           RW   master enable + per-engine enables
+0x08 STATUS         RO   bus_busy, cmd_busy, arb_lost_live
+0x0C ISR            W1C  sticky errors / events; write 1 to clear
+0x10 IER            RW   per-bit interrupt enable; matches ISR
+0x14 CMD            WO   1-deep shadow register: kind, ack_out, use_txdata, byte
+0x18 TXDATA         WO   push one byte into the TX-data FIFO (cfg.txFifoDepth deep)
+0x1C RXDATA         RO   pop one byte from the RX-data FIFO (cfg.rxFifoDepth deep)
+0x20 PRESCALE       RW   runtime override of BusTiming's quarter-period count
+0x24 TX_FIFO_STATUS RO   full / empty / count / depth
+0x28 RX_FIFO_STATUS RO   full / empty / count / depth
+0x2C CFG_INFO       RO   bus_speed / addr_mode / use_clock_stretching / clk MHz
+```
+
+`make docs` will dump an HTML datasheet, a C header, JSON, RALF
+and SystemRDL into `gen/` once `I2cController` lands (see Step 6
+in `TODO.md`).
 
 ## Quickstart
 
