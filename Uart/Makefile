@@ -6,8 +6,20 @@ GEN_DIR  := gen
 SIM_DIR  := simWorkspace
 PCF      := icebreaker.pcf
 
+# IP revision -- single source of truth for the REVISION register
+# at offset 0x00 of UartController. Threaded into every sbt invocation
+# that elaborates the controller (REVISION_DEFS below) and read on the
+# Scala side via sys.props in `src/hw/Revision.scala`. Keep the
+# defaults there in lockstep with these values.
+REVISION_MAJOR := 0
+REVISION_MINOR := 1
+REVISION_PATCH := 0
+REVISION_DEFS  := -Drevision.major=$(REVISION_MAJOR) \
+                  -Drevision.minor=$(REVISION_MINOR) \
+                  -Drevision.patch=$(REVISION_PATCH)
+
 # Tools
-SBT     := sbt
+SBT     := sbt $(REVISION_DEFS)
 YOSYS   := yosys
 NEXTPNR := nextpnr-ice40
 ICEPACK := icepack

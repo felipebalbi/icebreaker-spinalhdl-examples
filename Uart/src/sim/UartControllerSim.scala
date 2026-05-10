@@ -30,16 +30,17 @@ import spinal.lib.bus.amba3.apb.sim.Apb3Driver
 object UartControllerSim {
 
   // Register offsets — must match the address map in UartController.scala.
-  private val CTRL = 0x00
-  private val STATUS = 0x04
-  private val ISR = 0x08
-  private val IER = 0x0c
-  private val TXDATA = 0x10
-  private val RXDATA = 0x14
-  private val BAUD = 0x18
-  private val TX_FIFO_STATUS = 0x1c
-  private val RX_FIFO_STATUS = 0x20
-  private val CFG_INFO = 0x24
+  private val REVISION = 0x00
+  private val CTRL = 0x04
+  private val STATUS = 0x08
+  private val ISR = 0x0c
+  private val IER = 0x10
+  private val TXDATA = 0x14
+  private val RXDATA = 0x18
+  private val BAUD = 0x1c
+  private val TX_FIFO_STATUS = 0x20
+  private val RX_FIFO_STATUS = 0x24
+  private val CFG_INFO = 0x28
 
   // ISR / IER bit positions (mirror layout).
   private val IRQ_FRAMING = 0
@@ -70,6 +71,20 @@ object UartControllerSim {
       apb.verbose = false
 
       dut.clockDomain.waitSampling(20)
+
+      // ----- REVISION -----
+      // Locks the Makefile → Scala system-property → register-file path:
+      // a stale REVISION readback in CI is a clear signal that the
+      // -Drevision.* flags didn't make it through.
+      val revisionWord = apb.read(REVISION)
+      val revPatchRb = (revisionWord & 0xffff).toInt
+      val revMinorRb = ((revisionWord >> 16) & 0xff).toInt
+      val revMajorRb = ((revisionWord >> 24) & 0xff).toInt
+      assert(
+        revMajorRb == Revision.major && revMinorRb == Revision.minor && revPatchRb == Revision.patch,
+        s"REVISION readback ${revMajorRb}.${revMinorRb}.${revPatchRb} != ${Revision.asString} (expected from Revision object / Makefile)"
+      )
+      println(s"[ok] REVISION = ${revMajorRb}.${revMinorRb}.${revPatchRb} (raw 0x${revisionWord.toString(16)})")
 
       // ----- introspection registers -----
       val cfgInfo = apb.read(CFG_INFO)

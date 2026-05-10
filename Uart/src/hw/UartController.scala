@@ -32,31 +32,33 @@ import spinal.lib.bus.regif.AccessType._
   *
   * == Address map ==
   * {{{
-  *   0x00 CTRL            RW   [0]=enable [1]=tx_enable [2]=rx_enable
-  *   0x04 STATUS          RO   [0]=tx_busy
-  *   0x08 ISR             W1C  sticky error/event flags; write 1 to clear
+  *   0x00 REVISION        RO   IP version, sourced from the Makefile.
+  *                             [31:24]=major [23:16]=minor [15:0]=patch
+  *   0x04 CTRL            RW   [0]=enable [1]=tx_enable [2]=rx_enable
+  *   0x08 STATUS          RO   [0]=tx_busy
+  *   0x0C ISR             W1C  sticky error/event flags; write 1 to clear
   *                             [0]=framing [1]=parity [2]=overrun
   *                             [3]=tx_done [4]=rx_done
-  *   0x0C IER             RW   per-bit enable / interrupt mask; matches
+  *   0x10 IER             RW   per-bit enable / interrupt mask; matches
   *                             ISR layout
-  *   0x10 TXDATA          WO   write pushes one byte into TX FIFO (silently
+  *   0x14 TXDATA          WO   write pushes one byte into TX FIFO (silently
   *                             dropped if TX_FIFO_STATUS.full is set —
   *                             software should poll first)
-  *   0x14 RXDATA          RO   read returns the FIFO front and pops it
+  *   0x18 RXDATA          RO   read returns the FIFO front and pops it
   *                             (returns 0 if RX_FIFO_STATUS.empty is set)
-  *   0x18 BAUD            RW   DDS phase increment driving BaudGenerator.
+  *   0x1C BAUD            RW   DDS phase increment driving BaudGenerator.
   *                             Reset = phaseIncFor(cfg.baudRate,
   *                             cfg.clkFreqHz). Firmware computes the value
   *                             from the system clock it knows it wired in;
   *                             there is no CLKFREQ register because a wrong
   *                             synth value would silently corrupt baud
   *                             rates.
-  *   0x1C TX_FIFO_STATUS  RO   [0]=full [1]=empty [15:8]=count
+  *   0x20 TX_FIFO_STATUS  RO   [0]=full [1]=empty [15:8]=count
   *                             [23:16]=depth (synth-time capacity)
-  *   0x20 RX_FIFO_STATUS  RO   same layout as TX. `empty=1` means no byte
+  *   0x24 RX_FIFO_STATUS  RO   same layout as TX. `empty=1` means no byte
   *                             is queued; firmware checks `!empty` before
   *                             reading RXDATA.
-  *   0x24 CFG_INFO        RO   [3:0]=dataBits-1 [5:4]=stopBits [7:6]=parity
+  *   0x28 CFG_INFO        RO   [3:0]=dataBits-1 [5:4]=stopBits [7:6]=parity
   *                             [11:8]=log2(oversample). Per-FIFO depths
   *                             live on the FIFO_STATUS registers, not here.
   * }}}
@@ -143,6 +145,30 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   // ----- regif -------------------------------------------------------------
 
   val busif = Apb3BusInterface(io.apb, (0x000, 256 Byte))
+
+  // REVISION --------------------------------------------------------------
+  //
+  // First register at offset 0x00 by convention: every IP we design
+  // exposes its (major, minor, patch) version here so firmware /
+  // bring-up scripts can fingerprint a synthesised image.
+  //
+  // Layout is "version-shaped" so a hex dump reads naturally:
+  //   [31:24] major   [23:16] minor   [15:0] patch
+  // (regif allocates fields bit-0-up, so the declaration order below
+  // is patch → minor → major.)
+  //
+  // Values come from JVM system properties stamped in by the Makefile
+  // (REVISION_{MAJOR,MINOR,PATCH}); see [[Revision]] for the read /
+  // default policy.
+
+  val REVISION = busif.newReg(doc = "IP revision (major.minor.patch), read-only")
+  val revPatch = REVISION.field(UInt(16 bits), RO, doc = "Patch version (16 bits, [15:0]).")
+  val revMinor = REVISION.field(UInt(8 bits), RO, doc = "Minor version (8 bits, [23:16]).")
+  val revMajor = REVISION.field(UInt(8 bits), RO, doc = "Major version (8 bits, [31:24]).")
+
+  revPatch := U(Revision.patch, 16 bits)
+  revMinor := U(Revision.minor, 8 bits)
+  revMajor := U(Revision.major, 8 bits)
 
   // CTRL ------------------------------------------------------------------
 

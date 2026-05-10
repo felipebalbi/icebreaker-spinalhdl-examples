@@ -90,11 +90,12 @@ case class UartEchoDemo(
     // PREADY low) so each transaction is a clean 2-cycle pulse.
     //
     // The loop is: poll RX_FIFO_STATUS → if !empty then read RXDATA into
-    // a holding register and write it to TXDATA.
+    // a holding register and write it to TXDATA. Addresses bumped up by
+    // 4 bytes vs. the original layout because REVISION now sits at 0x00.
 
-    val rxFifoStatusAddr = U(0x20, 8 bits)
-    val rxDataAddr = U(0x14, 8 bits)
-    val txDataAddr = U(0x10, 8 bits)
+    val rxFifoStatusAddr = U(0x24, 8 bits)
+    val rxDataAddr = U(0x18, 8 bits)
+    val txDataAddr = U(0x14, 8 bits)
 
     // Holding register for the byte we just read from RXDATA.
     val byteReg = Reg(Bits(cfg.dataBits bits)) init (0)

@@ -43,6 +43,8 @@ needs it.
       `RX_FIFO_STATUS` registers (full/empty/count/depth)
 - [x] `ISR` fields flipped from RC to W1C; `CLKFREQ` register
       removed
+- [x] `REVISION` register at offset 0x00 sourced from the
+      Makefile (Makefile-Scala plumbing via JVM system properties)
 
 ---
 
@@ -635,6 +637,76 @@ hands-on use of the controller:
 **Sim:** `make sim-controller`. Same loopback as Step 11; new
 assertions cover the FIFO depth/empty fields and the W1C clear
 behaviour.
+
+### ✅ Step 13 — `REVISION` register at offset 0x00
+
+**What landed:**
+
+A read-only `REVISION` register at offset 0x00, set to **0.1.0**,
+sourced from the project Makefile. This is the first instance of
+the convention "every IP we design exposes (major, minor, patch)
+at offset 0x00" — copy [[Revision]] into the next IP that needs it.
+
+- **Layout:**
+  ```
+  0x00 REVISION  RO  [31:24]=major [23:16]=minor [15:0]=patch
+  ```
+  Field declaration order in regif is bit-0-up, so the controller
+  declares `revPatch` (UInt 16 bits) → `revMinor` (UInt 8 bits) →
+  `revMajor` (UInt 8 bits) to land at the slots above. A hex dump
+  of the readback reads version-shaped: 0.1.0 → `0x0001_0000`.
+
+- **Plumbing (Makefile → Scala):** JVM system properties, no
+  codegen, no extra tooling.
+  - `Makefile` defines `REVISION_MAJOR := 0`, `REVISION_MINOR := 1`,
+    `REVISION_PATCH := 0` and bundles them into `REVISION_DEFS :=
+    -Drevision.major=$(REVISION_MAJOR) ...`. The `SBT` variable is
+    redefined as `sbt $(REVISION_DEFS)` so every existing rule
+    automatically forwards the flags to sbt's JVM.
+  - `src/hw/Revision.scala` (new) reads them via
+    `sys.props.getOrElse("revision.major", "0").toInt` (and
+    similarly for minor/patch) with bit-width require guards.
+    Defaults match the Makefile so a bare `sbt runMain ...` outside
+    Make still produces 0.1.0.
+
+- **Files added/changed:**
+  - `src/hw/Revision.scala` — **new**.
+  - `src/hw/UartController.scala` — REVISION register block as the
+    first `busif.newReg` so it lands at 0x00; address-map scaladoc
+    updated (everything bumped up by 4).
+  - `src/hw/UartEchoDemo.scala` — APB master FSM constants bumped
+    by 4: `rxFifoStatusAddr 0x20→0x24`, `rxDataAddr 0x14→0x18`,
+    `txDataAddr 0x10→0x14`.
+  - `src/sim/UartControllerSim.scala` — new `REVISION = 0x00`
+    constant and assertion that reads back the register and
+    compares against `Revision.{major,minor,patch}`. Locks the
+    Makefile→sim plumbing in CI. All other offsets bumped by 4.
+  - `Makefile` — `REVISION_{MAJOR,MINOR,PATCH}` and `REVISION_DEFS`
+    variables; `SBT := sbt $(REVISION_DEFS)` so every sbt
+    invocation forwards the flags.
+
+- **Updated address map:**
+  ```
+  0x00 REVISION         RO   [31:24]=major [23:16]=minor [15:0]=patch
+  0x04 CTRL             RW
+  0x08 STATUS           RO
+  0x0C ISR              W1C
+  0x10 IER              RW
+  0x14 TXDATA           WO
+  0x18 RXDATA           RO
+  0x1C BAUD             RW
+  0x20 TX_FIFO_STATUS   RO
+  0x24 RX_FIFO_STATUS   RO
+  0x28 CFG_INFO         RO
+  ```
+
+- **Sim:** `make sim-controller`. Same loopback as Step 12; the
+  REVISION assertion is the first thing the sim checks after
+  reset.
+
+- **Bumping the version:** edit `REVISION_{MAJOR,MINOR,PATCH}` in
+  the Makefile **and** the matching defaults in
+  `src/hw/Revision.scala` so direct sbt runs stay in sync.
 
 ---
 
