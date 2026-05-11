@@ -142,12 +142,20 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
             goto(idleState)
           }
         } elsewhen(inAckSlot && sclFall) {
-          sdaDrive := True
           inAckSlot := False
-          bitCount := 0
+          bitCount  := 0
           when(direction) {
+            // Read: this 9th SCL fall is also the slave's setup edge
+            // for data bit 0. Drive MSB of readByte now, pre-shift,
+            // and start readTxState already accounting for the bit
+            // we just emitted (bitCount := 1).
+            sdaDrive := readByte(7)
+            readByte := readByte(6 downto 0) ## False
+            bitCount := 1
             goto(readTxState)
           } otherwise {
+            // Write: just release; writeRxState will receive bits.
+            sdaDrive := True
             goto(writeRxState)
           }
         }
@@ -189,22 +197,42 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
 
     val readTxState = new State {
       whenIsActive {
-        when(sclFall && bitCount < 8) {
-          sdaDrive := readByte(7) // MSB first
-          readByte := readByte(6 downto 0) ## False
-          bitCount := bitCount + 1
-        }
-
-        when(bitCount === 8 && sclRise) {
-          val masterNak = io.bus.sda.read // master NAK -> SDA high
-          when(masterNak) {
-            // wait for start
-          }
+        // Start/Stop traps -- mirror writeRxState. Without these the
+        // slave deadlocks on the controller's Stop because nothing
+        // returns it to idle.
+        when(stopCond) {
           bitCount := 0
-        }
-
-        when(bitCount === 8 && sclFall) {
+          byteIdx  := 0
           sdaDrive := True
+          goto(idleState)
+        } elsewhen(startCond) {
+          bitCount := 0
+          byteIdx  := 0
+          sdaDrive := True
+          goto(addrState)
+        } otherwise {
+          // Drive the next data bit on each SCL fall. addrState pre-
+          // drove bit 7 (MSB) on the 9th fall and set bitCount := 1,
+          // so we drive bits 6..0 on the next 7 falls (bitCount 1..7
+          // -> 2..8). After bitCount reaches 8, all 8 data bits are
+          // out and we release SDA so the master can drive its
+          // ACK/NAK slot. We do NOT sample the master ACK here -- the
+          // slave doesn't need it (the controller decides ACK/NAK via
+          // ackOut), and trying to sample it on the same `bitCount
+          // === 8` rise as the LSB-sample edge would mis-time the
+          // release and trip the master's arb check.
+          when(sclFall && bitCount < 8) {
+            sdaDrive := readByte(7) // MSB-first within the remaining bits
+            readByte := readByte(6 downto 0) ## False
+            bitCount := bitCount + 1
+          }
+
+          // Once all 8 data bits are out, hold SDA released. The
+          // start/stop trap above takes us out when the master
+          // moves on (RepStart or Stop after the ACK slot).
+          when(bitCount === 8) {
+            sdaDrive := True
+          }
         }
       }
     }

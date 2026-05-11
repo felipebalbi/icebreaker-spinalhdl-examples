@@ -220,13 +220,18 @@ object I2cByteControllerSim {
       assert(!r1.ackIn,
         s"addr: target NAK'd (ackIn=true); expected ACK (false)")
 
-      // ReadData(NAK).
+      // ReadData(NAK) -- single-byte read, so we tell the controller
+      // to send NAK on the master ACK slot to signal end-of-read.
       issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
       val r2 = expectRsp(rig)
       assert(r2.status == ByteRspStatus.Ok,
         s"data: status=${r2.status}, expected Ok")
-      assert(!r2.ackIn,
-        s"data: target NAK'd (ackIn=true); expected ACK (false)")
+      // ackIn is meaningless on a ReadData rsp (the controller drove
+      // ACK itself); the load-bearing check is `data` -- the byte we
+      // received from the slave. Default BehaviouralI2cTarget sends
+      // 0xA5 (initial value of `readByte`).
+      assert(r2.data == 0xA5,
+        s"data: got 0x${r2.data.toString(16)}, expected 0xa5")
 
       // Stop.
       issueCmd(rig, ByteCmdKind.Stop)
