@@ -197,8 +197,8 @@ object ByteCmdKind extends SpinalEnum {
   *               follow with `Stop` or `RepStart`.
   */
 case class ByteCmd() extends Bundle {
-  val kind   = ByteCmdKind()
-  val data   = Bits(8 bits)
+  val kind = ByteCmdKind()
+  val data = Bits(8 bits)
   val ackOut = Bool()
 }
 
@@ -253,8 +253,8 @@ object ByteRspStatus extends SpinalEnum {
   *               always trustworthy.
   */
 case class ByteRsp() extends Bundle {
-  val data   = Bits(8 bits)
-  val ackIn  = Bool()
+  val data = Bits(8 bits)
+  val ackIn = Bool()
   val status = ByteRspStatus()
 }
 
@@ -315,7 +315,8 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     * commands `waitNextCmdState` accepts (WriteData when False,
     * ReadData when True). Cleared only implicitly by the next
     * AddrWrite/AddrRead (we never reset it on Stop because state
-    * identity already prevents stale reads from idle). */
+    * identity already prevents stale reads from idle).
+    */
   val isRead = Reg(Bool()) init (False)
 
   /** Wedged-regime flag. Set by:
@@ -328,7 +329,8 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     *   - the RepStart arm of `waitNextCmdState` (RepStart re-aims
     *     and is itself a recovery action).
     * Read by `waitNextCmdState` to gate the legal command set down
-    * to `Stop` / `RepStart` only. */
+    * to `Stop` / `RepStart` only.
+    */
   val mustTerminate = Reg(Bool()) init (False)
 
   /** Sticky arb-loss snapshot for the current bus operation. Set in
@@ -337,7 +339,8 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     * FSM to the corresponding RspState. Surfaced in
     * `rsp.status == ArbLost`. Cleared at the start of each new
     * transaction (idle's AddrWrite/AddrRead arms, RepStart, and
-    * Stop's onExit). */
+    * Stop's onExit).
+    */
   val arbLostReg = Reg(Bool()) init (False)
 
   /** Multi-purpose 8-bit shift register. Three roles, never
@@ -349,28 +352,32 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     * Latched on `io.cmd.fire` for outbound use (idle, RepStart arm,
     * WriteData arm). Cleared to 0 on idle's data ops, but the more
     * important reset is "loaded fresh at every cmd.fire that needs
-    * it" — we never carry stale outbound bytes across transactions. */
+    * it" — we never carry stale outbound bytes across transactions.
+    */
   val dataByte = Reg(Bits(8 bits)) init (0)
 
   /** Bit position counter for the 8-bit shift loops. 0..7 inclusive
     * (4 bits wide for headroom against off-by-one). Re-zeroed at the
     * start of each shift loop and again before entering the ACK
     * phase, so neither the shift nor the ACK depends on prior
-    * residual values. */
+    * residual values.
+    */
   val bitCounter = Reg(UInt(4 bits)) init (0)
 
   /** Latched target ACK from the 9th SCL pulse on a write op
     * (WriteBit ACK phase samples SDA via `BitCmd.ReadBit`). 0 = ACK,
     * 1 = NAK. Surfaced in the next rsp's `ackIn`. Written by
     * `writeAckWaitState`. Read by `writeRspState`. Carries no
-    * meaning on read transactions. */
+    * meaning on read transactions.
+    */
   val ackInReg = Reg(Bool()) init (False)
 
   /** Latched read-end NAK choice from the SW driver, captured at the
     * cycle `io.cmd.fire` for a `ReadData` op. Drives `txBit` during
     * the read ACK phase (`readAckIssueState`). Read again by
     * `readRspState` to decide whether to set `mustTerminate` (NAK
-    * means "this was the last byte"). */
+    * means "this was the last byte").
+    */
   val ackOutReg = Reg(Bool()) init (False)
 
   // -------------------------------------------------------------------------
@@ -393,8 +400,8 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
   //               waitNextCmdState with mustTerminate untouched, so
   //               the driver's next command must still be a
   //               terminator.
-  val errorStatus       = Reg(ByteRspStatus()) init (ByteRspStatus.Ok)
-  val errorReturnToIdle = Reg(Bool())          init (False)
+  val errorStatus = Reg(ByteRspStatus()) init (ByteRspStatus.Ok)
+  val errorReturnToIdle = Reg(Bool()) init (False)
 
   // -------------------------------------------------------------------------
   // Component-level defaults
@@ -408,9 +415,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
   // "nothing to do right now"; `Idle` is a safe payload that the
   // bit controller also ignores while valid is False. `txBit := True`
   // is "release SDA" (open-drain idle).
-  bitCtrl.io.cmd.valid   := False
+  bitCtrl.io.cmd.valid := False
   bitCtrl.io.cmd.payload := BitCmd.Idle
-  bitCtrl.io.txBit       := True
+  bitCtrl.io.txBit := True
 
   // Upstream command/response handshake. Only `idleState` and
   // `waitNextCmdState` raise `cmd.ready`; only the `*RspState`
@@ -418,10 +425,10 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
   // `ackIn := True` is NAK-ish, which is the safe interpretation if
   // a downstream consumer reads the field on a rsp where it isn't
   // meaningful (Stop, ReadData, InvalidSeq).
-  io.cmd.ready          := False
-  io.rsp.valid          := False
-  io.rsp.payload.data   := 0
-  io.rsp.payload.ackIn  := True
+  io.cmd.ready := False
+  io.rsp.valid := False
+  io.rsp.payload.data := 0
+  io.rsp.payload.ackIn := True
   io.rsp.payload.status := ByteRspStatus.Ok
 
   // -------------------------------------------------------------------------
@@ -458,15 +465,15 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
         when(io.cmd.fire) {
           switch(io.cmd.kind) {
             is(ByteCmdKind.AddrWrite) {
-              dataByte   := io.cmd.data(7 downto 1) ## False  // force R/W = 0
-              isRead     := False
+              dataByte := io.cmd.data(7 downto 1) ## False // force R/W = 0
+              isRead := False
               bitCounter := 0
               arbLostReg := False
               goto(startTransactionIssueState)
             }
             is(ByteCmdKind.AddrRead) {
-              dataByte   := io.cmd.data(7 downto 1) ## True   // force R/W = 1
-              isRead     := True
+              dataByte := io.cmd.data(7 downto 1) ## True // force R/W = 1
+              isRead := True
               bitCounter := 0
               arbLostReg := False
               goto(startTransactionIssueState)
@@ -476,7 +483,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
               // prior AddrWrite/AddrRead. Bus is idle, no
               // termination needed; route to errorRspState and
               // bounce back to idle once the rsp is consumed.
-              errorStatus       := ByteRspStatus.InvalidSeq
+              errorStatus := ByteRspStatus.InvalidSeq
               errorReturnToIdle := True
               goto(errorRspState)
             }
@@ -529,15 +536,15 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
               is(ByteCmdKind.RepStart) {
                 // RepStart's lsb is the direction selector — no
                 // masking here, see the design note in `idleState`.
-                dataByte      := io.cmd.data
-                isRead        := io.cmd.data.lsb
-                bitCounter    := 0
+                dataByte := io.cmd.data
+                isRead := io.cmd.data.lsb
+                bitCounter := 0
                 mustTerminate := False
-                arbLostReg    := False
+                arbLostReg := False
                 goto(repeatedStartIssueState)
               }
               default {
-                errorStatus       := ByteRspStatus.InvalidSeq
+                errorStatus := ByteRspStatus.InvalidSeq
                 errorReturnToIdle := False
                 goto(errorRspState)
               }
@@ -547,12 +554,12 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
             switch(io.cmd.kind) {
               is(ByteCmdKind.WriteData) {
                 when(!isRead) {
-                  dataByte   := io.cmd.data
+                  dataByte := io.cmd.data
                   bitCounter := 0
                   goto(writeShiftIssueState)
                 } otherwise {
                   // WriteData on a read-direction txn.
-                  errorStatus       := ByteRspStatus.InvalidSeq
+                  errorStatus := ByteRspStatus.InvalidSeq
                   errorReturnToIdle := False
                   goto(errorRspState)
                 }
@@ -560,19 +567,19 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
               is(ByteCmdKind.ReadData) {
                 when(isRead) {
                   bitCounter := 0
-                  ackOutReg  := io.cmd.ackOut  // SW's read-end NAK choice
+                  ackOutReg := io.cmd.ackOut // SW's read-end NAK choice
                   goto(readShiftIssueState)
                 } otherwise {
                   // ReadData on a write-direction txn.
-                  errorStatus       := ByteRspStatus.InvalidSeq
+                  errorStatus := ByteRspStatus.InvalidSeq
                   errorReturnToIdle := False
                   goto(errorRspState)
                 }
               }
               is(ByteCmdKind.RepStart) {
                 // Same direction-from-lsb rule as the wedged arm.
-                dataByte   := io.cmd.data
-                isRead     := io.cmd.data.lsb
+                dataByte := io.cmd.data
+                isRead := io.cmd.data.lsb
                 bitCounter := 0
                 arbLostReg := False
                 goto(repeatedStartIssueState)
@@ -582,7 +589,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
               }
               default {
                 // AddrWrite / AddrRead while already started.
-                errorStatus       := ByteRspStatus.InvalidSeq
+                errorStatus := ByteRspStatus.InvalidSeq
                 errorReturnToIdle := False
                 goto(errorRspState)
               }
@@ -609,9 +616,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     //   - `errorReturnToIdle = False`: issue `Stop` (always legal).
     val errorRspState: State = new State {
       whenIsActive {
-        io.rsp.valid          := True
-        io.rsp.payload.data   := 0
-        io.rsp.payload.ackIn  := True              // NAK-ish; meaningless for InvalidSeq
+        io.rsp.valid := True
+        io.rsp.payload.data := 0
+        io.rsp.payload.ackIn := True // NAK-ish; meaningless for InvalidSeq
         io.rsp.payload.status := errorStatus
 
         when(io.rsp.fire) {
@@ -642,7 +649,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     // meaningless on an arb-loss rsp, but cleanliness is cheap).
     val startTransactionIssueState: State = new State {
       whenIsActive {
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.Start
 
         when(bitCtrl.io.cmd.fire) {
@@ -689,7 +696,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     // the *previous* bit's value, which isn't what we want.
     val readShiftIssueState: State = new State {
       whenIsActive {
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.ReadBit
 
         when(bitCtrl.io.cmd.fire) {
@@ -709,7 +716,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
             // Shift the freshly-clocked bit into the LSB of dataByte;
             // I²C transmits MSB-first, so the first sample becomes
             // the eventual MSB after seven more shifts.
-            dataByte   := dataByte(6 downto 0) ## bitCtrl.io.rxBit
+            dataByte := dataByte(6 downto 0) ## bitCtrl.io.rxBit
             bitCounter := bitCounter + 1
             when(bitCounter === 7) {
               bitCounter := 0
@@ -728,9 +735,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
         // came from `io.cmd.ackOut` at the time the ReadData cmd
         // fired; 0 = ACK (target sends another byte), 1 = NAK
         // (target releases SDA, end-of-read).
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.WriteBit
-        bitCtrl.io.txBit       := ackOutReg
+        bitCtrl.io.txBit := ackOutReg
 
         when(bitCtrl.io.cmd.fire) {
           goto(readAckWaitState)
@@ -752,9 +759,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
 
     val readRspState: State = new State {
       whenIsActive {
-        io.rsp.valid          := True
-        io.rsp.payload.data   := dataByte
-        io.rsp.payload.ackIn  := False  // n/a on read; we drove ACK ourselves
+        io.rsp.valid := True
+        io.rsp.payload.data := dataByte
+        io.rsp.payload.ackIn := False // n/a on read; we drove ACK ourselves
         io.rsp.payload.status := arbLostReg ? ByteRspStatus.ArbLost | ByteRspStatus.Ok
 
         when(io.rsp.fire) {
@@ -797,9 +804,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
       whenIsActive {
         // I²C transmits MSB first; the bit ctrl latches `txBit` on
         // `cmd.fire`, so we only need to drive it during Issue.
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.WriteBit
-        bitCtrl.io.txBit       := dataByte.msb
+        bitCtrl.io.txBit := dataByte.msb
 
         when(bitCtrl.io.cmd.fire) {
           goto(writeShiftWaitState)
@@ -821,7 +828,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
             // just sent; next MSB will be old dataByte(6)). The
             // `## False` is cosmetic — that bit will be replaced
             // before it ever reaches the bus.
-            dataByte   := dataByte(6 downto 0) ## False
+            dataByte := dataByte(6 downto 0) ## False
             bitCounter := bitCounter + 1
             when(bitCounter === 7) {
               bitCounter := 0
@@ -839,7 +846,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
         // Sample target ACK on the 9th clock. The bit ctrl performs
         // a ReadBit (releases SDA, samples mid-tHigh). We don't
         // drive `txBit` here; it stays at the default "release".
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.ReadBit
 
         when(bitCtrl.io.cmd.fire) {
@@ -864,9 +871,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
 
     val writeRspState: State = new State {
       whenIsActive {
-        io.rsp.valid          := True
-        io.rsp.payload.data   := 0  // address & write rsps carry no read data
-        io.rsp.payload.ackIn  := ackInReg
+        io.rsp.valid := True
+        io.rsp.payload.data := 0 // address & write rsps carry no read data
+        io.rsp.payload.ackIn := ackInReg
         io.rsp.payload.status := arbLostReg ? ByteRspStatus.ArbLost | ByteRspStatus.Ok
 
         when(io.rsp.fire) {
@@ -912,7 +919,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     //                           are still settling.
     val stopIssueState: State = new State {
       whenIsActive {
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.Stop
 
         when(bitCtrl.io.cmd.fire) {
@@ -936,9 +943,9 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
 
     val stopRspState: State = new State {
       whenIsActive {
-        io.rsp.valid          := True
-        io.rsp.payload.data   := 0      // no data on a Stop response
-        io.rsp.payload.ackIn  := False  // n/a for Stop
+        io.rsp.valid := True
+        io.rsp.payload.data := 0 // no data on a Stop response
+        io.rsp.payload.ackIn := False // n/a for Stop
         io.rsp.payload.status := arbLostReg ? ByteRspStatus.ArbLost | ByteRspStatus.Ok
 
         when(io.rsp.fire) {
@@ -953,7 +960,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
         //  they are unconditionally re-latched at the next
         //  AddrWrite/AddrRead cmd.fire.)
         mustTerminate := False
-        arbLostReg    := False
+        arbLostReg := False
       }
     }
 
@@ -972,7 +979,7 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
     // to `writeRspState` and report it.
     val repeatedStartIssueState: State = new State {
       whenIsActive {
-        bitCtrl.io.cmd.valid   := True
+        bitCtrl.io.cmd.valid := True
         bitCtrl.io.cmd.payload := BitCmd.RepStart
 
         when(bitCtrl.io.cmd.fire) {

@@ -221,7 +221,7 @@ case class BusTiming(cfg: I2cConfig) {
     */
   private def toClockCycles(timeNs: Int): Int = {
     val product = cfg.clkFreqHz.toLong * timeNs.toLong
-    val cycles  = divRoundUp(product, 1000000000L)
+    val cycles = divRoundUp(product, 1000000000L)
     require(
       cycles <= Int.MaxValue,
       s"BusTiming: cycle count $cycles for ${timeNs}ns @ ${cfg.clkFreqHz} Hz overflows Int"

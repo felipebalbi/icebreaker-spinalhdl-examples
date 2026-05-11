@@ -37,8 +37,8 @@ object I2cBitControllerSim {
   // Drive a command into the bit controller and wait for it to fire.
   private def issue(dut: I2cBitController, cmd: BitCmd.E, txBit: Boolean = false): Unit = {
     dut.io.cmd.payload #= cmd
-    dut.io.txBit       #= txBit
-    dut.io.cmd.valid   #= true
+    dut.io.txBit #= txBit
+    dut.io.cmd.valid #= true
     dut.clockDomain.waitSamplingWhere(dut.io.cmd.ready.toBoolean)
     dut.io.cmd.valid #= false
   }
@@ -94,7 +94,7 @@ object I2cBitControllerSim {
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("smoke-start-stop") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
       dut.io.cmd.valid #= false
-      dut.io.txBit     #= false
+      dut.io.txBit #= false
       val mirror = mirrorBus(dut)
       dut.clockDomain.waitSampling(5)
 
@@ -119,11 +119,11 @@ object I2cBitControllerSim {
       assert(dut.io.bus.scl.write.toBoolean, "bus.scl should rest released after Stop")
       assert(dut.io.bus.sda.write.toBoolean, "bus.sda should rest released after Stop")
       assert(sdaEdges.falling >= 1, s"expected SDA fall during Start, got ${sdaEdges.falling}")
-      assert(sdaEdges.rising  >= 1, s"expected SDA rise during Stop, got ${sdaEdges.rising}")
+      assert(sdaEdges.rising >= 1, s"expected SDA rise during Stop, got ${sdaEdges.rising}")
       // SCL: falls once (after Start dwell), rises once (during Stop sequence),
       // falls again? No -- Stop ends with SCL released. So 1 fall, 1 rise.
       assert(sclEdges.falling == 1, s"expected 1 SCL fall, got ${sclEdges.falling}")
-      assert(sclEdges.rising  == 1, s"expected 1 SCL rise, got ${sclEdges.rising}")
+      assert(sclEdges.rising == 1, s"expected 1 SCL rise, got ${sclEdges.rising}")
 
       println("OK: smoke Start->Stop")
     }
@@ -137,7 +137,7 @@ object I2cBitControllerSim {
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("write-byte") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
       dut.io.cmd.valid #= false
-      dut.io.txBit     #= false
+      dut.io.txBit #= false
       val mirror = mirrorBus(dut)
       dut.clockDomain.waitSampling(5)
 
@@ -186,8 +186,8 @@ object I2cBitControllerSim {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("read-byte") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
-      dut.io.cmd.valid    #= false
-      dut.io.txBit        #= false
+      dut.io.cmd.valid #= false
+      dut.io.txBit #= false
       // Default: bus reads what we drive (no second participant).
       dut.io.bus.scl.read #= true
       dut.io.bus.sda.read #= true
@@ -231,15 +231,15 @@ object I2cBitControllerSim {
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("rep-start") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
       dut.io.cmd.valid #= false
-      dut.io.txBit     #= false
+      dut.io.txBit #= false
       val mirror = mirrorBus(dut)
       dut.clockDomain.waitSampling(5)
 
-      issue(dut, BitCmd.Start);              waitDone(dut)
-      issue(dut, BitCmd.WriteBit, txBit = true);  waitDone(dut)
-      issue(dut, BitCmd.RepStart);           waitDone(dut)
+      issue(dut, BitCmd.Start); waitDone(dut)
+      issue(dut, BitCmd.WriteBit, txBit = true); waitDone(dut)
+      issue(dut, BitCmd.RepStart); waitDone(dut)
       issue(dut, BitCmd.WriteBit, txBit = false); waitDone(dut)
-      issue(dut, BitCmd.Stop);               waitDone(dut)
+      issue(dut, BitCmd.Stop); waitDone(dut)
       mirror.terminate()
 
       assert(dut.io.bus.scl.write.toBoolean, "SCL released after Stop")
@@ -257,8 +257,8 @@ object I2cBitControllerSim {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("arb-loss") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
-      dut.io.cmd.valid    #= false
-      dut.io.txBit        #= false
+      dut.io.cmd.valid #= false
+      dut.io.txBit #= false
       dut.io.bus.scl.read #= true
       dut.io.bus.sda.read #= true
       val mirror = fork {
@@ -300,8 +300,8 @@ object I2cBitControllerSim {
     )
     SimConfig.withWave.compile(I2cBitController(cfg)).doSim("clock-stretch") { dut =>
       dut.clockDomain.forkStimulus(period = 10)
-      dut.io.cmd.valid    #= false
-      dut.io.txBit        #= false
+      dut.io.cmd.valid #= false
+      dut.io.txBit #= false
       dut.io.bus.scl.read #= true
       dut.io.bus.sda.read #= true
 
@@ -343,7 +343,7 @@ object I2cBitControllerSim {
       mirror.terminate()
 
       val expectedDelta = stretchN * 10L // sim period = 10
-      val actualDelta   = tStretched - tNormal
+      val actualDelta = tStretched - tNormal
       assert(
         actualDelta >= expectedDelta,
         s"stretching: expected at least +$expectedDelta time, got +$actualDelta " +

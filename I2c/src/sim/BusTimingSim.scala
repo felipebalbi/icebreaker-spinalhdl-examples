@@ -40,32 +40,32 @@ object BusTimingSim {
   // can't be fooled by a buggy table that "agrees with itself".
   private val specMinsNs: Map[BusSpeed.E, Map[String, Int]] = Map(
     BusSpeed.Standard -> Map(
-      "tHigh"  -> 4000,
-      "tLow"   -> 4700,
+      "tHigh" -> 4000,
+      "tLow" -> 4700,
       "tHdSta" -> 4000,
       "tSuSta" -> 4700,
       "tSuSto" -> 4000,
-      "tBuf"   -> 4700,
+      "tBuf" -> 4700,
       "tSuDat" -> 250,
       "tHdDat" -> 0
     ),
     BusSpeed.Fast -> Map(
-      "tHigh"  -> 600,
-      "tLow"   -> 1300,
+      "tHigh" -> 600,
+      "tLow" -> 1300,
       "tHdSta" -> 600,
       "tSuSta" -> 600,
       "tSuSto" -> 600,
-      "tBuf"   -> 1300,
+      "tBuf" -> 1300,
       "tSuDat" -> 100,
       "tHdDat" -> 0
     ),
     BusSpeed.FastPlus -> Map(
-      "tHigh"  -> 260,
-      "tLow"   -> 500,
+      "tHigh" -> 260,
+      "tLow" -> 500,
       "tHdSta" -> 260,
       "tSuSta" -> 260,
       "tSuSto" -> 260,
-      "tBuf"   -> 500,
+      "tBuf" -> 500,
       "tSuDat" -> 50,
       "tHdDat" -> 0
     )
@@ -103,11 +103,11 @@ object BusTimingSim {
 
   private def runOne(clkFreqHz: Int, speed: BusSpeed.E): Unit = {
     val cfg = I2cConfig(clkFreqHz = clkFreqHz, busSpeed = speed)
-    val t   = BusTiming(cfg)
+    val t = BusTiming(cfg)
 
     val achievedSclHz = clkFreqHz.toDouble / (t.tHigh + t.tLow).toDouble
-    val stretched     = (t.tHigh + t.tLow) > 4 * cfg.quarterPeriodCycles
-    val errPct        = (achievedSclHz - cfg.busFreqHz) / cfg.busFreqHz * 100.0
+    val stretched = (t.tHigh + t.tLow) > 4 * cfg.quarterPeriodCycles
+    val errPct = (achievedSclHz - cfg.busFreqHz) / cfg.busFreqHz * 100.0
 
     println(
       f"--- ${speedLabel(speed)}%-9s @ ${clkFreqHz / 1000000}%2d MHz " +
@@ -130,18 +130,18 @@ object BusTimingSim {
     )
 
     val mins = specMinsNs(speed)
-    assertFloor("tHigh",  t.tHigh,  clkFreqHz, mins("tHigh"))
-    assertFloor("tLow",   t.tLow,   clkFreqHz, mins("tLow"))
+    assertFloor("tHigh", t.tHigh, clkFreqHz, mins("tHigh"))
+    assertFloor("tLow", t.tLow, clkFreqHz, mins("tLow"))
     assertFloor("tHdSta", t.tHdSta, clkFreqHz, mins("tHdSta"))
     assertFloor("tSuSta", t.tSuSta, clkFreqHz, mins("tSuSta"))
     assertFloor("tSuSto", t.tSuSto, clkFreqHz, mins("tSuSto"))
-    assertFloor("tBuf",   t.tBuf,   clkFreqHz, mins("tBuf"))
+    assertFloor("tBuf", t.tBuf, clkFreqHz, mins("tBuf"))
     assertFloor("tSuDat", t.tSuDat, clkFreqHz, mins("tSuDat"))
     assertFloor("tHdDat", t.tHdDat, clkFreqHz, mins("tHdDat"))
 
     // Floor invariants from BusTiming itself.
     assert(t.tHigh >= t.tHighMin, "tHigh below tHighMin")
-    assert(t.tLow  >= t.tLowMin,  "tLow below tLowMin")
+    assert(t.tLow >= t.tLowMin, "tLow below tLowMin")
     assert(
       t.tHigh + t.tLow >= 4 * cfg.quarterPeriodCycles,
       s"tHigh+tLow=${t.tHigh + t.tLow} < 4*qpc=${4 * cfg.quarterPeriodCycles}"
@@ -167,7 +167,7 @@ object BusTimingSim {
     */
   private def regressionOverflowFix(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
-    val t   = BusTiming(cfg)
+    val t = BusTiming(cfg)
     assert(
       t.tBuf > 0,
       s"regression: tBuf=${t.tBuf} — Int*Int overflow has come back"

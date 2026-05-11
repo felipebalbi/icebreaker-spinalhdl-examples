@@ -57,13 +57,13 @@ object I2cIoSim {
       // sides see the same bus state -- the wired-AND fan-out has to
       // reach every participant.
       def step(
-          aScl: Boolean,
-          aSda: Boolean,
-          bScl: Boolean,
-          bSda: Boolean,
-          expScl: Boolean,
-          expSda: Boolean,
-          label: String
+        aScl: Boolean,
+        aSda: Boolean,
+        bScl: Boolean,
+        bSda: Boolean,
+        expScl: Boolean,
+        expSda: Boolean,
+        label: String
       ): Unit = {
         dut.io.a.scl.write #= aScl
         dut.io.a.sda.write #= aSda

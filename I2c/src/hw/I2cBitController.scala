@@ -83,11 +83,11 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
   val timing = BusTiming(cfg)
 
   val io = new Bundle {
-    val cmd     = slave Stream BitCmd()  // one bus event per fired command
-    val txBit   = in Bool ()             // value to drive on WriteBit
-    val rxBit   = out Bool ()            // last sampled SDA (ReadBit)
-    val arbLost = out Bool ()            // sticky: we wrote 1, bus stayed 0
-    val bus     = master(I2cIo())        // open-drain SCL/SDA
+    val cmd = slave Stream BitCmd() // one bus event per fired command
+    val txBit = in Bool () // value to drive on WriteBit
+    val rxBit = out Bool () // last sampled SDA (ReadBit)
+    val arbLost = out Bool () // sticky: we wrote 1, bus stayed 0
+    val bus = master(I2cIo()) // open-drain SCL/SDA
   }
 
   // Phase counter: wide enough to hold the largest dwell we'll ever
@@ -95,12 +95,12 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
   // period = 4 * quarterPeriodCycles. The +1 keeps log2Up honest at
   // power-of-two boundaries.
   private val phaseCounterWidth = log2Up(cfg.quarterPeriodCycles * 4 + 1) bits
-  val phaseCounter              = Reg(UInt(phaseCounterWidth)) init (0)
+  val phaseCounter = Reg(UInt(phaseCounterWidth)) init (0)
 
   // Latched-on-fire copies of cmd-time inputs. The producer is free
   // to change io.txBit / io.cmd.payload after fire, so we snapshot.
   val txBitLatched = Reg(Bool()) init (True)
-  val isRead       = Reg(Bool()) init (False)
+  val isRead = Reg(Bool()) init (False)
 
   // Registered SCL/SDA drives. True == "release" (open-drain pad
   // floats; external pull-up wins). Reset state is "bus idle".
@@ -112,10 +112,10 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
   // Sampled bit and arbitration-lost flag. arbLostReg is sticky
   // until cleared on the next accepted command (see idleState).
-  val rxBitReg   = Reg(Bool()) init (False)
+  val rxBitReg = Reg(Bool()) init (False)
   val arbLostReg = Reg(Bool()) init (False)
 
-  io.rxBit   := rxBitReg
+  io.rxBit := rxBitReg
   io.arbLost := arbLostReg
 
   // Default ready -- only the idle state asserts True.
@@ -135,13 +135,13 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
         when(io.cmd.fire) {
           // Snapshot inputs and clear the per-command arb flag.
           txBitLatched := io.txBit
-          isRead       := io.cmd.payload === BitCmd.ReadBit
-          arbLostReg   := False
+          isRead := io.cmd.payload === BitCmd.ReadBit
+          arbLostReg := False
 
           switch(io.cmd.payload) {
-            is(BitCmd.Start)    { goto(startState) }
+            is(BitCmd.Start) { goto(startState) }
             is(BitCmd.RepStart) { goto(repStartReleaseSdaState) }
-            is(BitCmd.Stop)     { goto(stopSdaLowState) }
+            is(BitCmd.Stop) { goto(stopSdaLowState) }
             is(BitCmd.WriteBit) {
               // NOTE: SDA is assigned HERE (in idleState's switch),
               // not in bitLowState.onEntry, on purpose.
@@ -162,13 +162,13 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
               sdaDrive := io.txBit
               goto(bitLowState)
             }
-            is(BitCmd.ReadBit)  {
+            is(BitCmd.ReadBit) {
               // Same rationale as WriteBit above: release SDA here,
               // not in bitLowState.onEntry.
               sdaDrive := True
               goto(bitLowState)
             }
-            is(BitCmd.Idle)     { /* no-op: stay in idleState */ }
+            is(BitCmd.Idle) { /* no-op: stay in idleState */ }
           }
         }
       }
@@ -182,7 +182,7 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
     // SDA=low -- the canonical mid-transaction resting position.
     val startState = new State {
       onEntry {
-        sdaDrive     := False
+        sdaDrive := False
         phaseCounter := timing.tHdSta
       }
       whenIsActive {
@@ -205,8 +205,8 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
     val repStartReleaseSdaState = new State {
       onEntry {
-        sdaDrive     := True            // release SDA -- might already be high
-        phaseCounter := timing.tSuDat   // SDA must be stable before SCL rises
+        sdaDrive := True // release SDA -- might already be high
+        phaseCounter := timing.tSuDat // SDA must be stable before SCL rises
       }
       whenIsActive {
         when(phaseCounter === 0) {
@@ -219,8 +219,8 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
     val repStartReleaseSclState = new State {
       onEntry {
-        sclDrive     := True            // release SCL -- bus heading toward (high, high)
-        phaseCounter := timing.tSuSta   // SCL stable high before SDA falls
+        sclDrive := True // release SCL -- bus heading toward (high, high)
+        phaseCounter := timing.tSuSta // SCL stable high before SDA falls
       }
       whenIsActive {
         // If clock stretching is enabled, a target can hold SCL low
@@ -231,7 +231,7 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
           if (cfg.useClockStretching) io.bus.scl.read else True
 
         when(phaseCounter === 0) {
-          goto(startState)              // shared Start tail produces the SDA fall
+          goto(startState) // shared Start tail produces the SDA fall
         } elsewhen (mayCount) {
           phaseCounter := phaseCounter - 1
         }
@@ -250,8 +250,8 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
       onEntry {
         // Force SDA low so the upcoming SCL release produces no
         // premature Stop edge. No-op if SDA was already low.
-        sdaDrive     := False
-        phaseCounter := timing.tSuDat   // SDA stable before SCL rises
+        sdaDrive := False
+        phaseCounter := timing.tSuDat // SDA stable before SCL rises
       }
       whenIsActive {
         when(phaseCounter === 0) {
@@ -264,8 +264,8 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
     val stopSclRiseState = new State {
       onEntry {
-        sclDrive     := True
-        phaseCounter := timing.tSuSto   // SCL stable high before Stop edge
+        sclDrive := True
+        phaseCounter := timing.tSuSto // SCL stable high before Stop edge
       }
       whenIsActive {
         // Same clock-stretching rationale as repStartReleaseSclState.
@@ -282,7 +282,7 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
     val stopSdaRiseState = new State {
       onEntry {
-        sdaDrive     := True            // <-- the Stop edge
+        sdaDrive := True // <-- the Stop edge
         phaseCounter := timing.tBuf
       }
       whenIsActive {
@@ -327,7 +327,7 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
 
     val bitHighState = new State {
       onEntry {
-        sclDrive     := True            // release SCL -> pull-up brings it high
+        sclDrive := True // release SCL -> pull-up brings it high
         phaseCounter := timing.tHigh
       }
       whenIsActive {
@@ -342,8 +342,8 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
             // arbLostReg latch survives until the next cmd.fire.
             when(txBitLatched && !io.bus.sda.read) {
               arbLostReg := True
-              sclDrive   := True        // release SCL immediately
-              sdaDrive   := True        // (we were already trying to release SDA)
+              sclDrive := True // release SCL immediately
+              sdaDrive := True // (we were already trying to release SDA)
               goto(idleState)
             }
           }
@@ -356,7 +356,7 @@ case class I2cBitController(cfg: I2cConfig) extends Component {
           if (cfg.useClockStretching) io.bus.scl.read else True
 
         when(phaseCounter === 0) {
-          sclDrive := False             // pull SCL low -> next bit's bitLowState rests here
+          sclDrive := False // pull SCL low -> next bit's bitLowState rests here
           goto(idleState)
         } elsewhen (mayCount && phaseCounter =/= 0) {
           phaseCounter := phaseCounter - 1
