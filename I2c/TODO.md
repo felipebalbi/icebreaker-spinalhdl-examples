@@ -480,6 +480,19 @@ val io = new Bundle {
 
 **Makefile:** `sim-bytectrl` target.
 
+**Scaffold landed** — `src/sim/BehaviouralI2cTarget.scala` (config
+knobs + IO + release-bus placeholder), `src/sim/I2cByteControllerSim.scala`
+(header, `issueCmd` / `expectRsp` / `ByteRspSnapshot` helper signatures,
+12 stubbed cases, `main`), and `sim-bytectrl` wired into the Makefile
+`sim` aggregate. Bodies still TODO.
+
+Divergence from the original 4-case hint above: the scaffold has 12
+cases. The four extra beyond the hints are `caseMultiByteWrite`,
+`caseMultiByteRead`, `caseDataNak`, and three `caseInvalidSeq*` paths
+(from-idle, wedged-after-NAK, direction-mismatch) — added because
+the post-`hasStarted`-removal byte FSM exposes `ByteRspStatus.InvalidSeq`
+as a first-class outcome that the original hint block predates.
+
 ---
 
 ### 🔲 Step 6 — `I2cController` (APB3-fronted register-mapped wrapper)

@@ -69,7 +69,7 @@ $(BIN): $(ASC)
 
 # Aggregate sim target -- per-block sim targets get added as the
 # project grows. Keep this list and .PHONY in sync.
-sim: sim-i2cio sim-bustiming sim-bitctrl ## Run all simulations
+sim: sim-i2cio sim-bustiming sim-bitctrl sim-bytectrl ## Run all simulations
 
 sim-i2cio: ## Run I2cIo (wired-AND bus model) simulation
 	$(SBT) -batch "runMain $(PACKAGE).I2cIoSim"
@@ -79,6 +79,9 @@ sim-bustiming: ## Run BusTiming (pure-Scala spec-floor audit) simulation
 
 sim-bitctrl: ## Run I2cBitController (bit-level FSM) simulation
 	$(SBT) -batch "runMain $(PACKAGE).I2cBitControllerSim"
+
+sim-bytectrl: ## Run I2cByteController (byte-level FSM) simulation
+	$(SBT) -batch "runMain $(PACKAGE).I2cByteControllerSim"
 
 # The next three targets fail until Step 6 (I2cController) ships --
 # the Scala entrypoints (I2cControllerSim, I2cControllerVerilog,
@@ -119,4 +122,4 @@ help: ## Show this help (every target with a ## description)
 		/^[a-zA-Z0-9_.-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' \
 		$(MAKEFILE_LIST)
 
-.PHONY: all sim sim-i2cio sim-bustiming sim-bitctrl sim-controller gen-controller docs waves flash clean distclean help
+.PHONY: all sim sim-i2cio sim-bustiming sim-bitctrl sim-bytectrl sim-controller gen-controller docs waves flash clean distclean help
