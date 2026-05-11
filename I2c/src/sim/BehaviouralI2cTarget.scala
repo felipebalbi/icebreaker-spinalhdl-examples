@@ -139,6 +139,7 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
           when(matched) {
             sdaDrive := False // pull SDA low for the ACK slot
             direction := isRead
+            inAckSlot := True
           } otherwise {
             sdaDrive := True // NAK
             goto(idleState)
