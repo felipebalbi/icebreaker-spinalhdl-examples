@@ -128,6 +128,72 @@ The forthcoming `BusTiming` helper (Step 3) **must** consume
 `quarterPeriodCycles` rather than re-derive from `clkFreqHz` /
 `busFreqHz`, otherwise the rounding rule has two homes.
 
+## Bus-shaped FSM idiom (established by `I2cBitController`)
+
+Every FSM in this project that drives an open-drain (or any
+multi-driver) bus follows this pattern. Codified during Step 4
+and now a project-wide rule.
+
+### Registered drivers, not per-state combinational drives
+
+Bus lines come from `Reg(Bool())` regs at Component scope:
+
+```scala
+val sclDrive = Reg(Bool()) init(True)   // True = released
+val sdaDrive = Reg(Bool()) init(True)
+io.bus.scl.write := sclDrive
+io.bus.sda.write := sdaDrive
+```
+
+States touch only the lines they change; lines that need to *hold*
+the previous value just don't write. This avoids the trap of having
+to re-assert every line in every state, and matches how a real bus
+peripheral usually has its drive registers updated by a control FSM
+rather than recomputed every cycle.
+
+Do **not** call `io.bus.releaseAll()` at Component scope alongside
+the registered drives — last-assignment-wins makes `releaseAll()`
+clobber the regs, and the bus will never go low.
+
+### Edge on entry, dwell in active
+
+Each state owns one bus edge and one dwell:
+
+```scala
+someState.onEntry {
+  someDrive    := <new value>          // the edge
+  phaseCounter := timing.<spec value>  // dwell until next edge
+}
+someState.whenIsActive {
+  when(phaseCounter === 0) { goto(nextState) }
+  .otherwise              { phaseCounter := phaseCounter - 1 }
+}
+```
+
+Reading the states top-to-bottom gives the bus waveform. A state
+that needs neither an edge nor a dwell does not earn a state — fold
+it into a neighbour.
+
+Names end in `State` (`idleState`, `bitLowState`, `stopSdaRiseState`,
+…). This is a convention, not a Spinal requirement, but it makes the
+state-machine block scannable.
+
+### Compile-time toggles via Scala `if`, not Spinal `when`
+
+Optional features keyed off `cfg` (clock stretching, future timeouts)
+gate counter logic with a Scala-time `if`:
+
+```scala
+val mayCount = if (cfg.useClockStretching) io.bus.scl.read else True
+when(phaseCounter === 0) { goto(nextState) }
+.elsewhen(mayCount)      { phaseCounter := phaseCounter - 1 }
+```
+
+When the toggle is `false`, `mayCount` collapses to a constant `True`
+and the SCL sense path disappears entirely from the synthesised
+design. A Spinal `when(cfg.useClockStretching) { ... }` would still
+emit the gating logic and the sense wire — strictly worse.
+
 ## Step closeout convention
 
 When closing a step:

@@ -4,11 +4,12 @@ A from-scratch I²C **controller** and **target** in SpinalHDL, targeting
 the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
-Status: **Phase 0 complete** — `I2cConfig`, `I2cIo`, and `BusTiming`
-have all landed with sims. Phase 1 builds an APB3-fronted
-`I2cController` (mirror of `UartController` in the sibling project)
-on top of `I2cBitController` and `I2cByteController`. See
-`TODO.md` for the full bring-up plan.
+Status: **Phase 0 complete + `I2cBitController` landed.** `I2cConfig`,
+`I2cIo`, `BusTiming` and the bit-level FSM (`I2cBitController`) all
+have sims. Phase 1 builds an APB3-fronted `I2cController` (mirror of
+`UartController` in the sibling project) on top of `I2cBitController`
+and the upcoming `I2cByteController`. See `TODO.md` for the full
+bring-up plan.
 
 ## What's in scope
 
@@ -30,7 +31,10 @@ on top of `I2cBitController` and `I2cByteController`. See
 
 ## What's out of scope (for now)
 
-- Multi-master arbitration. Single-controller is hard enough first.
+- Multi-master arbitration. `I2cBitController` already detects
+  arbitration loss spec-compliantly (releases both lines, returns
+  to idle), but the higher-level FSMs and the regif don't yet
+  surface or recover from it.
 - High-speed mode (3.4 MHz). Same reason.
 - SMBus / PMBus quirks (host notify, packet error checking, etc.).
   The FSM should be flexible enough to add these later.

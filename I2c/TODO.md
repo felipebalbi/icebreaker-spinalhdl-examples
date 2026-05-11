@@ -27,6 +27,8 @@ survives independently of the source.
 - [x] `I2cIoSim` (sim-side wired-AND glue, reused by later sims)
 - [x] `BusTiming` (spec-floor cycle table reconciled with `quarterPeriodCycles`)
 - [x] `BusTimingSim` (pure-Scala spec-floor audit across BusSpeed × clkFreqHz)
+- [x] `I2cBitController` (9-state FSM, registered SCL/SDA drives, optional clock stretching, spec-compliant arbitration loss)
+- [x] `I2cBitControllerSim` (Start/Stop, write-byte, read-byte, RepStart, arbitration loss, clock stretching)
 
 ---
 
@@ -266,7 +268,7 @@ aggregate and `.PHONY`.
 
 ## 🔲 Phase 1 — Controller (host)
 
-### 🔲 Step 4 — `I2cBitController`
+### ✅ Step 4 — `I2cBitController`
 
 **Goal:** own SCL toggling and one-bit-at-a-time bus operations.
 Given a command word, drive the right (SCL, SDA) edges with the
@@ -274,69 +276,130 @@ right `BusTiming` cycle counts, then assert `done`. This is the
 only block that touches `I2cIo` directly; everything above it
 speaks bytes.
 
-**File:** `src/hw/I2cBitController.scala`
+**Files:** `src/hw/I2cBitController.scala`,
+`src/sim/I2cBitControllerSim.scala`.
 
-**Suggested IO:**
-```scala
-object BitCmd extends SpinalEnum {
-  val Idle, Start, RepStart, Stop, WriteBit, ReadBit = newElement()
-}
+**What landed:**
 
-val io = new Bundle {
-  val cmd     = slave Stream BitCmd()        // one command per transaction
-  val txBit   = in  Bool()                   // value to drive on WriteBit
-  val rxBit   = out Bool()                   // last sampled SDA on ReadBit
-  val arbLost = out Bool()                   // we wrote 1 but bus stayed 0
-  val bus     = master(I2cIo())              // open-drain SCL/SDA
-}
+- `BitCmd` SpinalEnum: `{ Idle, Start, RepStart, Stop, WriteBit,
+  ReadBit }` exactly as the hint suggested.
+- `case class I2cBitController(cfg: I2cConfig) extends Component`
+  with the suggested IO bundle (`cmd: Stream[BitCmd]`, `txBit`,
+  `rxBit`, `arbLost`, `bus: I2cIo`).
+- Internal `val timing = BusTiming(cfg)` so the FSM reads spec
+  cycle counts by name (`tHdSta`, `tSuSta`, `tSuSto`, `tBuf`,
+  `tSuDat`, `tHigh`, `tLow`).
+
+**State machine — 9 states, not 7:**
+
+The hint suggested seven states (`Idle`, `Setup`, `ScLLow`,
+`ScLRise`, `ScLHigh`, `ScLFall`, `Hold` or similar — a single
+shared bit pipeline). What landed is a different decomposition
+that emerged from a Socratic walk-through:
+
+```
+idleState                                            (1)
+startState                                           (1)  Start tail; also reused by RepStart
+repStartReleaseSdaState, repStartReleaseSclState     (2)  RepStart prep
+stopSdaLowState, stopSclRiseState, stopSdaRiseState  (3)
+bitLowState, bitHighState                            (2)  shared by Read/Write
 ```
 
-**Design notes:**
-- **State machine, not a counter soup.** Use `spinal.lib.fsm` with
-  states `{ Idle, Setup, ScLLow, ScLRise, ScLHigh, ScLFall,
-  Hold }` (or similar). Each transition is gated by a single
-  shared `phaseCounter` that loads from `BusTiming` on entry.
-- **Quarter-period scheduling.** The natural phase structure is
-  four quarter-bit slots: drop SCL → set SDA → raise SCL →
-  sample/drive bit. Reuse `cfg.quarterPeriodCycles` as the
-  baseline; per-edge stretching (`tHdSta`, `tSuSto`, `tBuf`)
-  loads a different value.
-- **Clock stretching path** (only when `cfg.useClockStretching`):
-  after we release SCL high, do not start counting `tHigh` until
-  `bus.scl.sample === True`. Wrap this in a cfg-gated branch so
-  the wait state synthesises away when stretching is disabled.
-  Leave a `TODO` for a future stretch-timeout register; do **not**
-  build it in this step.
-- **Arbitration detection.** During `WriteBit` of a `1`, sample
-  SDA in the high phase. If `bus.sda.sample === False`, someone
-  else is pulling — set `arbLost`, abort the transaction, return
-  to `Idle` with the bus released.
-- **`Start` from `Idle`:** SDA falls while SCL is high. From a
-  released bus, this is `release SDA → release SCL → drive SDA
-  low → drive SCL low after tHdSta`. `RepStart` does the same
-  starting from "SCL just went low after a previous bit".
-- **`Stop`:** SCL low → SDA low → SCL high → SDA high after
-  tSuSto. After Stop, enforce `tBuf` of bus-free time before we
-  accept the next `cmd`.
-- **Reset:** both lines released, FSM in `Idle`. `cmd.ready` low
-  until reset is over so a fast producer doesn't slam in.
+Why this layout:
 
-**Sim hints (`src/sim/I2cBitControllerSim.scala`):**
-- Use the `I2cIoBus` Component from `src/sim/` (Step 2) to glue the
-  controller's
-  `I2cIo` to a Scala-side passive observer that records edges.
-- For each command, assert the recorded edge sequence matches a
-  golden trace (cycle counts equal to `BusTiming` values, ±0).
-- Arbitration test: schedule a `WriteBit(1)` and have the sim
-  helper drive SDA low during the high phase; assert `arbLost`
-  rises and the FSM returns to `Idle` within one bit.
-- Stretch test (only when `useClockStretching = true`): hold SCL
-  low for N cycles after the controller releases it; assert the
-  high phase is `N + tHigh` cycles long, not `tHigh`.
-- Smoke test: a sequence `Start → WriteBit×8 → ReadBit → Stop`
-  produces no protocol violations on the recorded trace.
+- **Each state owns exactly one edge and one dwell.** The body
+  pattern is `onEntry { drive an edge; load phaseCounter }` /
+  `whenIsActive { decrement; transition at zero }`. Reading the
+  states top-to-bottom gives the bus waveform directly.
+- **Read and Write share `bitLowState`/`bitHighState`.** They
+  differ only in two lines: `bitLowState`'s SDA assignment
+  (`Mux(isRead, True, txBitLatched)`) and the mid-`tHigh`
+  branch (sample vs. arb-check). Splitting them into 4 + 4
+  states would have been pure code duplication.
+- **`startState` is shared by both Start and RepStart.**
+  RepStart adds two prep states (`releaseSda`, `releaseScl`)
+  that drag the bus from "mid-transaction (SCL low, SDA = last
+  bit)" back to "(SCL high, SDA high)", then falls into the
+  shared `startState` tail.
+- **No `Hold` state.** The spec says `tHdDat = 0 ns` for every
+  speed grade, so there's nothing to hold. `bitHighState` exits
+  straight to `idleState` after pulling SCL low.
 
-**Makefile:** `sim-bitctrl` target; add to `sim` aggregate.
+**Divergences from the original hint:**
+
+1. **State naming convention.** All state names end in `State`
+   per the convention adopted during this step. This survives
+   into all future FSMs in the I2c project.
+2. **Registered SCL/SDA drivers.** The hint implied direct
+   per-state combinational drives. What landed: `Reg(Bool())`
+   regs `sclDrive` / `sdaDrive` driven from the FSM, with
+   `io.bus.scl.write := sclDrive` / `io.bus.sda.write :=
+   sdaDrive` at component scope. This lets each state touch
+   only the lines it changes; consecutive states that need to
+   hold the previous drive value (very common — e.g., SDA stays
+   low through the entire Start sequence) just don't write.
+   This is a project-wide pattern now (see AGENTS.md).
+3. **Clock stretching is a Scala-time `if`.** Wrapped around
+   the counter-decrement in `bitHighState` and
+   `stopSclRiseState`. When `cfg.useClockStretching = false`
+   the SCL sense path and the gating logic disappear from the
+   synthesised design entirely (the Scala `if` evaluates at
+   elaboration). When `true`, the counter pauses while
+   `io.bus.scl.read` is low.
+4. **Spec-compliant arbitration loss.** On detecting that we
+   tried to release SDA but the bus reads low, the FSM
+   immediately releases both SCL and SDA, sets `arbLostReg`,
+   and returns to `idleState`. The flag is sticky until the
+   next accepted command. Multi-master safe out of the box.
+5. **`BitCmd.Idle`** is a no-op that stays in `idleState`. An
+   explicit "do nothing but consume one cmd slot" is a useful
+   sync barrier for the byte-level FSM.
+
+**Sim:** `I2cBitControllerSim` covers six cases:
+
+- **smoke Start→Stop:** Verifies framing edges and that the bus
+  rests released after Stop. Counts SCL/SDA edges with a
+  passive observer fork.
+- **write byte 0xA5:** Issues 8 `WriteBit` commands MSB-first,
+  samples SDA mid-`tHigh` per bit, counts SCL pulses.
+- **read byte 0x69:** A sim-side "slave" pre-sets SDA before
+  each `ReadBit`; checks that `rxBit` matches what the slave
+  drove.
+- **RepStart:** Start → WriteBit → RepStart → WriteBit → Stop;
+  verifies the prep-then-fall sequence and that `arbLost` stays
+  clear.
+- **arbitration loss:** Issues `WriteBit(1)` then forces
+  `bus.sda.read := False` mid-`tHigh`; asserts `arbLost` rises
+  and both lines are released.
+- **clock stretching:** With `useClockStretching = true`, holds
+  `bus.scl.read` low for 50 cycles after the controller
+  releases SCL during a `WriteBit`. Asserts the stretched bit
+  takes at least 50 cycles longer than a non-stretched bit.
+
+**Open follow-ups:**
+
+- **SDA-assignment asymmetry between `idleState` and `bitLowState`
+  is tech debt.** `WriteBit`/`ReadBit` set `sdaDrive` in
+  `idleState`'s switch (live `io.txBit`) rather than in
+  `bitLowState.onEntry` (which would see the lagged
+  `txBitLatched` Reg). It works, but it's easy for a future
+  contributor to "consolidate" the SDA assignment back into
+  `bitLowState.onEntry` and silently reintroduce the bug. Both
+  sites carry warning comments. Revisit once Step 5
+  (`I2cByteController`) exercises back-to-back bits at speed —
+  candidate fixes include a dedicated `bitSetupState` or a
+  combinational cmd-payload shim that states can read without
+  the Reg-update lag.
+- A stretch-timeout register (mentioned in the original hint).
+  Belongs on `I2cController` as a writable register, not in
+  `I2cBitController`. Deferred to Step 6.
+- The arbitration-loss recovery currently bails to `idleState`
+  but doesn't propagate the flag back through the `cmd`
+  handshake. The byte controller (Step 5) needs to observe
+  `arbLost` directly and decide whether to abort the byte.
+
+**Makefile:** `sim-bitctrl` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 
