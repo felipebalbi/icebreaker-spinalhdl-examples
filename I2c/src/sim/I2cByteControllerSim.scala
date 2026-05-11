@@ -66,29 +66,75 @@ object I2cByteControllerSim {
       status: ByteRspStatus.E
   )
 
-  // ----- Helpers --------------------------------------------------------
+  // ----- Test rig --------------------------------------------------------
   //
-  // Signatures only; bodies wait for the first real test case to
-  // anchor the patterns.
+  // Wraps the controller, the behavioural target, and the wired-AND
+  // I2cIoBus glue into a single top-level Component so SpinalSim has
+  // exactly one `compile` target. The bus has no IO on the rig — the
+  // wired-AND lives entirely inside it. The test pokes the
+  // controller's cmd/rsp streams and snoops the controller-side bus
+  // signals for assertions.
+  private case class Rig(
+      cfg: I2cConfig,
+      tCfg: BehaviouralI2cTargetConfig
+  ) extends Component {
+    val io = new Bundle {
+      val cmd = slave Stream ByteCmd()
+      val rsp = master Stream ByteRsp()
+    }
+    val dut    = I2cByteController(cfg)
+    val target = new BehaviouralI2cTarget(cfg, tCfg)
+    val bus    = new I2cIoBus
+
+    io.cmd        <> dut.io.cmd
+    dut.io.rsp    <> io.rsp
+    dut.io.bus    <> bus.io.a
+    target.io.bus <> bus.io.b
+  }
+
+  // ----- Helpers --------------------------------------------------------
 
   /** Drive one [[ByteCmd]] into the DUT and wait for the producer
     * handshake to fire.
+    *
+    * Uses `waitSamplingWhere(cmd.ready)` rather than polling because
+    * the controller's `cmd.ready` only rises in the idle/started/
+    * wedged hubs — between Issue/Wait pairs at the bit-ctrl level
+    * it stays low for many cycles. Drop `valid` on the same cycle
+    * we observe `ready` (== `fire`) so a second cmd doesn't
+    * accidentally land back-to-back.
     */
   private def issueCmd(
-      dut: I2cByteController,
+      rig: Rig,
       kind: ByteCmdKind.E,
       data: Int = 0,
       ackOut: Boolean = false
   ): Unit = {
-    // TODO: drive io.cmd.{kind, data, ackOut} and waitSamplingWhere(io.cmd.fire).
-    dut.clockDomain.waitSampling()
+    rig.io.cmd.kind   #= kind
+    rig.io.cmd.data   #= data
+    rig.io.cmd.ackOut #= ackOut
+    rig.io.cmd.valid  #= true
+    rig.clockDomain.waitSamplingWhere(rig.io.cmd.ready.toBoolean)
+    rig.io.cmd.valid  #= false
   }
 
-  /** Wait for one [[ByteRsp]] and snapshot its fields. */
-  private def expectRsp(dut: I2cByteController): ByteRspSnapshot = {
-    // TODO: io.rsp.ready := True; waitSamplingWhere(io.rsp.fire); snapshot.
-    dut.clockDomain.waitSampling()
-    ByteRspSnapshot(0, ackIn = true, ByteRspStatus.Ok)
+  /** Wait for one [[ByteRsp]] and snapshot its fields.
+    *
+    * Snapshots `data`/`ackIn`/`status` while `valid` is still true,
+    * then drops `ready` next cycle so a stale `ready` doesn't
+    * consume the next response.
+    */
+  private def expectRsp(rig: Rig): ByteRspSnapshot = {
+    rig.io.rsp.ready #= true
+    rig.clockDomain.waitSamplingWhere(rig.io.rsp.valid.toBoolean)
+    val snap = ByteRspSnapshot(
+      data   = rig.io.rsp.data.toBigInt,
+      ackIn  = rig.io.rsp.ackIn.toBoolean,
+      status = rig.io.rsp.status.toEnum
+    )
+    rig.clockDomain.waitSampling()
+    rig.io.rsp.ready #= false
+    snap
   }
 
   // ----- Test cases -----------------------------------------------------
@@ -99,9 +145,56 @@ object I2cByteControllerSim {
 
   /** AddrWrite + WriteData + Stop, target ACKs both bytes.
     * Smoke test of the happy path.
+    *
+    * Asserts:
+    *   - Each cmd produces exactly one rsp (3 cmds, 3 rsps).
+    *   - All three rsps carry status = Ok.
+    *   - Both write rsps carry ackIn = false (target accepted).
+    *   - After Stop, the bus is released by the controller (both
+    *     `bus.scl.write` and `bus.sda.write` are high). The wired-AND
+    *     plus the target's idle-released drives mean the bus is at
+    *     idle.
     */
   private def caseSmokeWriteByte(): Unit = {
-    println("PENDING: caseSmokeWriteByte")
+    val cfg  = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-write-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+
+      // WriteData(0xA5).
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xA5)
+      val r2 = expectRsp(rig)
+      assert(r2.status == ByteRspStatus.Ok,
+        s"data: status=${r2.status}, expected Ok")
+      assert(!r2.ackIn,
+        s"data: target NAK'd (ackIn=true); expected ACK (false)")
+
+      // Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r3 = expectRsp(rig)
+      assert(r3.status == ByteRspStatus.Ok,
+        s"stop: status=${r3.status}, expected Ok")
+
+      // Let the bus settle, then check it's released.
+      rig.clockDomain.waitSampling(20)
+      assert(rig.dut.io.bus.scl.write.toBoolean,
+        "SCL not released after Stop")
+      assert(rig.dut.io.bus.sda.write.toBoolean,
+        "SDA not released after Stop")
+
+      println("OK: caseSmokeWriteByte")
+    }
   }
 
   /** AddrRead + ReadData(NAK) + Stop, target sends 0xA5.
