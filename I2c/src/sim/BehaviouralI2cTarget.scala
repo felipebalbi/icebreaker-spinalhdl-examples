@@ -2,6 +2,7 @@ package i2c
 
 import spinal.core._
 import spinal.lib._
+import spinal.lib.fsm._
 
 /** Sim-only behavioural I²C target.
   *
@@ -80,16 +81,134 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
     val bus = master(I2cIo())
   }
 
-  // Placeholder: release both lines so the wired-AND lets the
-  // controller drive freely. Replace with a real decode/drive FSM
-  // when the test bodies are filled in.
   io.bus.scl.write := True
   io.bus.sda.write := True
 
-  // TODO: implement target FSM
-  //   - Start/Stop detection.
-  //   - Address-byte capture and address match.
-  //   - Per-byte ACK/NAK driven from `tCfg.ackPattern`.
-  //   - Register file read/write per `tCfg.regFileInit`.
-  //   - Optional clock stretch driven by `tCfg.stretchCycles`.
+  val sclR = RegNext(io.bus.scl.read) init(True)
+  val sdaR = RegNext(io.bus.sda.read) init(True)
+
+  val sclRise = !sclR && io.bus.scl.read
+  val sclFall = sclR && !io.bus.scl.read
+  val sdaRise = !sdaR && io.bus.sda.read
+  val sdaFall = sdaR && !io.bus.sda.read
+
+  val startCond = sdaFall && io.bus.scl.read
+  val stopCond = sdaRise && io.bus.scl.read
+
+  val inAckSlot = Reg(Bool()) init(False)
+  val direction = Reg(Bool()) init(False)
+  val isRead = Reg(Bool()) init(False)
+
+  val readByte = Reg(Bits(8 bits)) init B"8'ha5"
+  val shiftReg = Reg(Bits(8 bits)) init(0)
+  val byteIdx = Reg(UInt(8 bits)) init(0)
+
+  val bitCount = Reg(UInt(4 bits)) init(0)
+
+  val ackVec = if (tCfg.ackPattern.isEmpty)
+    Vec(True, 1)
+  else
+    Vec(tCfg.ackPattern.map(Bool(_)))
+
+  val ackThisByte = ackVec(byteIdx.resize(log2Up(ackVec.length)) % ackVec.length)
+
+  val sdaDrive = Reg(Bool()) init(True)
+  io.bus.scl.write := True
+  io.bus.sda.write := sdaDrive
+
+  val fsm = new StateMachine {
+    val idleState: State = new State with EntryPoint {
+      whenIsActive {
+        when(startCond) {
+          goto(addrState)
+        }
+      }
+    }
+
+    val addrState: State = new State {
+      whenIsActive {
+        when(sclRise) {
+          shiftReg := shiftReg(6 downto 0) ## io.bus.sda.read
+          bitCount := bitCount + 1
+        }
+
+        when(bitCount === 8 && sclFall) {
+          val matched = shiftReg(7 downto 1) === tCfg.targetAddress
+          val isRead = shiftReg.lsb
+
+          when(matched) {
+            sdaDrive := False // pull SDA low for the ACK slot
+            direction := isRead
+          } otherwise {
+            sdaDrive := True // NAK
+            goto(idleState)
+          }
+        } elsewhen(inAckSlot && sclFall) {
+          sdaDrive := True
+          inAckSlot := False
+          bitCount := 0
+          when(direction) {
+            goto(readTxState)
+          } otherwise {
+            goto(writeRxState)
+          }
+        }
+      }
+    }
+
+    val writeRxState = new State {
+      whenIsActive {
+        when(stopCond) {
+          bitCount := 0
+          byteIdx := 0
+          inAckSlot := False
+          goto(idleState)
+        } elsewhen(startCond) {
+          bitCount := 0
+          byteIdx := 0
+          inAckSlot := False
+          goto(addrState)
+        } otherwise {
+          when(sclRise && bitCount =/= 8) {
+            shiftReg := shiftReg(6 downto 0) ## io.bus.sda.read
+            bitCount := bitCount + 1
+          }
+
+          when(bitCount === 8 && sclFall && !inAckSlot) {
+            sdaDrive := !ackThisByte
+            inAckSlot := True
+          }
+
+          when(inAckSlot && sclFall) {
+            sdaDrive := True
+            inAckSlot := False
+            bitCount := 0
+            byteIdx := byteIdx + 1
+          }
+        }
+      }
+    }
+
+    val readTxState = new State {
+      whenIsActive {
+        when(sclFall && bitCount < 8) {
+          sdaDrive := readByte(7) // MSB first
+          readByte := readByte(6 downto 0) ## False
+          bitCount := bitCount + 1
+        }
+
+        when(bitCount === 8 && sclRise) {
+          val masterNak = io.bus.sda.read // master NAK -> SDA high
+          when(masterNak) {
+            // wait for start
+          }
+          bitCount := 0
+        }
+
+        when(bitCount === 8 && sclFall) {
+          sdaDrive := True
+        }
+      }
+    }
+  }
 }
