@@ -81,9 +81,6 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
     val bus = master(I2cIo())
   }
 
-  io.bus.scl.write := True
-  io.bus.sda.write := True
-
   val sclR = RegNext(io.bus.scl.read) init(True)
   val sdaR = RegNext(io.bus.sda.read) init(True)
 

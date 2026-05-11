@@ -86,10 +86,13 @@ object I2cByteControllerSim {
     val target = new BehaviouralI2cTarget(cfg, tCfg)
     val bus    = new I2cIoBus
 
-    io.cmd        <> dut.io.cmd
-    dut.io.rsp    <> io.rsp
+    dut.io.cmd << io.cmd
+    io.rsp << dut.io.rsp
     dut.io.bus    <> bus.io.a
     target.io.bus <> bus.io.b
+
+    val sclWriteOut = dut.io.bus.scl.write.simPublic()
+    val sdaWriteOut = dut.io.bus.sda.write.simPublic()
   }
 
   // ----- Helpers --------------------------------------------------------
@@ -188,9 +191,9 @@ object I2cByteControllerSim {
 
       // Let the bus settle, then check it's released.
       rig.clockDomain.waitSampling(20)
-      assert(rig.dut.io.bus.scl.write.toBoolean,
+      assert(rig.sclWriteOut.toBoolean,
         "SCL not released after Stop")
-      assert(rig.dut.io.bus.sda.write.toBoolean,
+      assert(rig.sdaWriteOut.toBoolean,
         "SDA not released after Stop")
 
       println("OK: caseSmokeWriteByte")
@@ -201,7 +204,45 @@ object I2cByteControllerSim {
     * Smoke test of the read direction.
     */
   private def caseSmokeReadByte(): Unit = {
-    println("PENDING: caseSmokeReadByte")
+    val cfg  = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-read-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
+      issueCmd(rig, ByteCmdKind.AddrRead, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+
+      // ReadData(NAK).
+      issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
+      val r2 = expectRsp(rig)
+      assert(r2.status == ByteRspStatus.Ok,
+        s"data: status=${r2.status}, expected Ok")
+      assert(!r2.ackIn,
+        s"data: target NAK'd (ackIn=true); expected ACK (false)")
+
+      // Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r3 = expectRsp(rig)
+      assert(r3.status == ByteRspStatus.Ok,
+        s"stop: status=${r3.status}, expected Ok")
+
+      // Let the bus settle, then check it's released.
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean,
+        "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean,
+        "SDA not released after Stop")
+
+      println("OK: caseSmokeReadByte")
+    }
   }
 
   /** AddrWrite + WriteData × 3 + Stop. Verifies the FSM stays
