@@ -82,13 +82,13 @@ object I2cByteControllerSim {
       val cmd = slave Stream ByteCmd()
       val rsp = master Stream ByteRsp()
     }
-    val dut    = I2cByteController(cfg)
+    val dut = I2cByteController(cfg)
     val target = new BehaviouralI2cTarget(cfg, tCfg)
-    val bus    = new I2cIoBus
+    val bus = new I2cIoBus
 
     dut.io.cmd << io.cmd
     io.rsp << dut.io.rsp
-    dut.io.bus    <> bus.io.a
+    dut.io.bus <> bus.io.a
     target.io.bus <> bus.io.b
 
     val sclWriteOut = dut.io.bus.scl.write.simPublic()
@@ -113,12 +113,12 @@ object I2cByteControllerSim {
       data: Int = 0,
       ackOut: Boolean = false
   ): Unit = {
-    rig.io.cmd.kind   #= kind
-    rig.io.cmd.data   #= data
+    rig.io.cmd.kind #= kind
+    rig.io.cmd.data #= data
     rig.io.cmd.ackOut #= ackOut
-    rig.io.cmd.valid  #= true
+    rig.io.cmd.valid #= true
     rig.clockDomain.waitSamplingWhere(rig.io.cmd.ready.toBoolean)
-    rig.io.cmd.valid  #= false
+    rig.io.cmd.valid #= false
   }
 
   /** Wait for one [[ByteRsp]] and snapshot its fields.
@@ -131,8 +131,8 @@ object I2cByteControllerSim {
     rig.io.rsp.ready #= true
     rig.clockDomain.waitSamplingWhere(rig.io.rsp.valid.toBoolean)
     val snap = ByteRspSnapshot(
-      data   = rig.io.rsp.data.toBigInt,
-      ackIn  = rig.io.rsp.ackIn.toBoolean,
+      data = rig.io.rsp.data.toBigInt,
+      ackIn = rig.io.rsp.ackIn.toBoolean,
       status = rig.io.rsp.status.toEnum
     )
     rig.clockDomain.waitSampling()
@@ -159,7 +159,7 @@ object I2cByteControllerSim {
     *     idle.
     */
   private def caseSmokeWriteByte(): Unit = {
-    val cfg  = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
     SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-write-byte") { rig =>
       rig.clockDomain.forkStimulus(period = 10)
@@ -170,31 +170,24 @@ object I2cByteControllerSim {
       // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
       issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
       val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok,
-        s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn,
-        s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
 
       // WriteData(0xA5).
-      issueCmd(rig, ByteCmdKind.WriteData, data = 0xA5)
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
       val r2 = expectRsp(rig)
-      assert(r2.status == ByteRspStatus.Ok,
-        s"data: status=${r2.status}, expected Ok")
-      assert(!r2.ackIn,
-        s"data: target NAK'd (ackIn=true); expected ACK (false)")
+      assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
+      assert(!r2.ackIn, s"data: target NAK'd (ackIn=true); expected ACK (false)")
 
       // Stop.
       issueCmd(rig, ByteCmdKind.Stop)
       val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok,
-        s"stop: status=${r3.status}, expected Ok")
+      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
 
       // Let the bus settle, then check it's released.
       rig.clockDomain.waitSampling(20)
-      assert(rig.sclWriteOut.toBoolean,
-        "SCL not released after Stop")
-      assert(rig.sdaWriteOut.toBoolean,
-        "SDA not released after Stop")
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
 
       println("OK: caseSmokeWriteByte")
     }
@@ -204,7 +197,7 @@ object I2cByteControllerSim {
     * Smoke test of the read direction.
     */
   private def caseSmokeReadByte(): Unit = {
-    val cfg  = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
     SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-read-byte") { rig =>
       rig.clockDomain.forkStimulus(period = 10)
@@ -215,36 +208,29 @@ object I2cByteControllerSim {
       // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
       issueCmd(rig, ByteCmdKind.AddrRead, data = 0x50 << 1)
       val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok,
-        s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn,
-        s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
 
       // ReadData(NAK) -- single-byte read, so we tell the controller
       // to send NAK on the master ACK slot to signal end-of-read.
       issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
       val r2 = expectRsp(rig)
-      assert(r2.status == ByteRspStatus.Ok,
-        s"data: status=${r2.status}, expected Ok")
+      assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
       // ackIn is meaningless on a ReadData rsp (the controller drove
       // ACK itself); the load-bearing check is `data` -- the byte we
       // received from the slave. Default BehaviouralI2cTarget sends
-      // 0xA5 (initial value of `readByte`).
-      assert(r2.data == 0xA5,
-        s"data: got 0x${r2.data.toString(16)}, expected 0xa5")
+      // 0x55 (initial value of `readByte`).
+      assert(r2.data == 0x55, s"data: got 0x${r2.data.toString(16)}, expected 0x55")
 
       // Stop.
       issueCmd(rig, ByteCmdKind.Stop)
       val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok,
-        s"stop: status=${r3.status}, expected Ok")
+      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
 
       // Let the bus settle, then check it's released.
       rig.clockDomain.waitSampling(20)
-      assert(rig.sclWriteOut.toBoolean,
-        "SCL not released after Stop")
-      assert(rig.sdaWriteOut.toBoolean,
-        "SDA not released after Stop")
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
 
       println("OK: caseSmokeReadByte")
     }
@@ -254,7 +240,40 @@ object I2cByteControllerSim {
     * addressed across data bytes (no spurious Start between bytes).
     */
   private def caseMultiByteWrite(): Unit = {
-    println("PENDING: caseMultiByteWrite")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("multi-write-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+
+      // WriteData(0xA5).
+      for (i <- 0 until 3) {
+        issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
+        val r2 = expectRsp(rig)
+        assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
+        assert(!r2.ackIn, s"data: target NAK'd (ackIn=true); expected ACK (false)")
+      }
+
+      // Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r3 = expectRsp(rig)
+      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+
+      // Let the bus settle, then check it's released.
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+
+      println("OK: caseMultiWriteByte")
+    }
   }
 
   /** AddrRead + ReadData(ACK) × 2 + ReadData(NAK) + Stop. Verifies
@@ -263,7 +282,45 @@ object I2cByteControllerSim {
     * of a read).
     */
   private def caseMultiByteRead(): Unit = {
-    println("PENDING: caseMultiByteRead")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-read-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
+      issueCmd(rig, ByteCmdKind.AddrRead, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
+      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+
+      for (i <- 0 until 3) {
+        // ReadData(NAK) -- single-byte read, so we tell the controller
+        // to send NAK on the master ACK slot to signal end-of-read.
+        issueCmd(rig, ByteCmdKind.ReadData, ackOut = i == 2)
+        val r2 = expectRsp(rig)
+        assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
+        // ackIn is meaningless on a ReadData rsp (the controller drove
+        // ACK itself); the load-bearing check is `data` -- the byte we
+        // received from the slave. Default BehaviouralI2cTarget sends
+        // 0xA5 (initial value of `readByte`).
+        assert(r2.data == 0x55, s"data: got 0x${r2.data.toString(16)}, expected 0x55")
+      }
+
+      // Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r3 = expectRsp(rig)
+      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+
+      // Let the bus settle, then check it's released.
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+
+      println("OK: caseMultiReadByte")
+    }
   }
 
   /** AddrWrite + WriteData(reg) + RepStart + AddrRead +
@@ -350,6 +407,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 0 / 12 implemented")
+    println("Done: 4 / 12 implemented")
   }
 }

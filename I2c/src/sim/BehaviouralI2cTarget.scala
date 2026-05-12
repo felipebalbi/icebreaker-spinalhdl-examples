@@ -81,8 +81,8 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
     val bus = master(I2cIo())
   }
 
-  val sclR = RegNext(io.bus.scl.read) init(True)
-  val sdaR = RegNext(io.bus.sda.read) init(True)
+  val sclR = RegNext(io.bus.scl.read) init (True)
+  val sdaR = RegNext(io.bus.sda.read) init (True)
 
   val sclRise = !sclR && io.bus.scl.read
   val sclFall = sclR && !io.bus.scl.read
@@ -92,24 +92,33 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
   val startCond = sdaFall && io.bus.scl.read
   val stopCond = sdaRise && io.bus.scl.read
 
-  val inAckSlot = Reg(Bool()) init(False)
-  val direction = Reg(Bool()) init(False)
-  val isRead = Reg(Bool()) init(False)
+  val inAckSlot = Reg(Bool()) init (False)
+  val direction = Reg(Bool()) init (False)
+  val isRead = Reg(Bool()) init (False)
 
-  val readByte = Reg(Bits(8 bits)) init B"8'ha5"
-  val shiftReg = Reg(Bits(8 bits)) init(0)
-  val byteIdx = Reg(UInt(8 bits)) init(0)
+  val readByte = Reg(Bits(8 bits)) init (0)
+  val shiftReg = Reg(Bits(8 bits)) init (0)
+  val byteIdx = Reg(UInt(8 bits)) init (0)
 
-  val bitCount = Reg(UInt(4 bits)) init(0)
+  val regAddr = Reg(UInt(8 bits)) init (0)
+  val regFile = Vec(Reg(Bits(8 bits)), 256)
 
-  val ackVec = if (tCfg.ackPattern.isEmpty)
-    Vec(True, 1)
-  else
-    Vec(tCfg.ackPattern.map(Bool(_)))
+  for ((el, i) <- regFile.zipWithIndex) {
+    el := tCfg.regFileInit.getOrElse(i, 0x55)
+  }
+
+  val bitCount = Reg(UInt(4 bits)) init (0)
+  val inReadAck = Reg(Bool()) init (False)
+
+  val ackVec =
+    if (tCfg.ackPattern.isEmpty)
+      Vec(True, 1)
+    else
+      Vec(tCfg.ackPattern.map(Bool(_)))
 
   val ackThisByte = ackVec(byteIdx.resize(log2Up(ackVec.length)) % ackVec.length)
 
-  val sdaDrive = Reg(Bool()) init(True)
+  val sdaDrive = Reg(Bool()) init (True)
   io.bus.scl.write := True
   io.bus.sda.write := sdaDrive
 
@@ -141,16 +150,16 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
             sdaDrive := True // NAK
             goto(idleState)
           }
-        } elsewhen(inAckSlot && sclFall) {
+        } elsewhen (inAckSlot && sclFall) {
           inAckSlot := False
-          bitCount  := 0
+          bitCount := 0
           when(direction) {
             // Read: this 9th SCL fall is also the slave's setup edge
             // for data bit 0. Drive MSB of readByte now, pre-shift,
             // and start readTxState already accounting for the bit
             // we just emitted (bitCount := 1).
-            sdaDrive := readByte(7)
-            readByte := readByte(6 downto 0) ## False
+            sdaDrive := regFile(regAddr)(7)
+            readByte := regFile(regAddr)(6 downto 0) ## False
             bitCount := 1
             goto(readTxState)
           } otherwise {
@@ -169,7 +178,7 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
           byteIdx := 0
           inAckSlot := False
           goto(idleState)
-        } elsewhen(startCond) {
+        } elsewhen (startCond) {
           bitCount := 0
           byteIdx := 0
           inAckSlot := False
@@ -202,36 +211,68 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig) ext
         // returns it to idle.
         when(stopCond) {
           bitCount := 0
-          byteIdx  := 0
+          byteIdx := 0
+          inReadAck := False
           sdaDrive := True
           goto(idleState)
-        } elsewhen(startCond) {
+        } elsewhen (startCond) {
           bitCount := 0
-          byteIdx  := 0
+          byteIdx := 0
+          inReadAck := False
           sdaDrive := True
           goto(addrState)
         } otherwise {
-          // Drive the next data bit on each SCL fall. addrState pre-
-          // drove bit 7 (MSB) on the 9th fall and set bitCount := 1,
-          // so we drive bits 6..0 on the next 7 falls (bitCount 1..7
-          // -> 2..8). After bitCount reaches 8, all 8 data bits are
-          // out and we release SDA so the master can drive its
-          // ACK/NAK slot. We do NOT sample the master ACK here -- the
-          // slave doesn't need it (the controller decides ACK/NAK via
-          // ackOut), and trying to sample it on the same `bitCount
-          // === 8` rise as the LSB-sample edge would mis-time the
-          // release and trip the master's arb check.
+          // Drive bits 6..0 on falls 10..16. addrState pre-drove bit
+          // 7 on the 9th fall and handed us bitCount := 1, so we drive
+          // 7 more bits to land at bitCount === 8 after the 16th fall.
           when(sclFall && bitCount < 8) {
             sdaDrive := readByte(7) // MSB-first within the remaining bits
             readByte := readByte(6 downto 0) ## False
             bitCount := bitCount + 1
           }
 
-          // Once all 8 data bits are out, hold SDA released. The
-          // start/stop trap above takes us out when the master
-          // moves on (RepStart or Stop after the ACK slot).
+          // Once all 8 data bits are out, hold SDA released so the
+          // master owns the ACK slot. Level-sensitive on purpose:
+          // re-asserts every cycle, so we don't have to worry about
+          // exactly which edge releases the line.
           when(bitCount === 8) {
             sdaDrive := True
+          }
+
+          // The ACK slot spans two SCL rises:
+          //   - 17th rise: master samples our LSB. Slave must NOT
+          //     react -- the byte's data phase hasn't ended yet from
+          //     the master's POV. We just remember "I've seen the LSB
+          //     sample" by setting inReadAck.
+          //   - 18th rise: master samples its own ACK/NAK level. This
+          //     is the one we care about (handled below).
+          // Without this two-step disambiguation, both rises would
+          // trip the same `bitCount === 8 && sclRise` condition and
+          // we'd react on the wrong edge.
+          when(bitCount === 8 && sclRise && !inReadAck) {
+            inReadAck := True
+          }
+
+          // 18th rise: master ACK/NAK sample.
+          //   - SDA low  -> master ACKed -> "give me another byte".
+          //     Reload readByte from the next regFile entry and reset
+          //     bitCount to 0. We do NOT touch sdaDrive here -- the
+          //     18th rise is the master's slot, the slave releases.
+          //     The next sclFall (the bit-7 setup edge for the new
+          //     byte) is when the body's `bitCount < 8` branch will
+          //     fire and drive bit 7 from the freshly-loaded readByte.
+          //   - SDA high -> master NAKed -> end of read. Do nothing;
+          //     the Stop or RepStart that follows will trip the trap
+          //     above and pull us out of readTxState.
+          // Either way, clear inReadAck so the next byte (if any)
+          // starts the two-step disambiguation fresh.
+          when(bitCount === 8 && sclRise && inReadAck) {
+            inReadAck := False
+            when(!io.bus.sda.read) {
+              readByte := regFile(regAddr + 1)
+              bitCount := 0
+              regAddr := regAddr + 1
+            }
           }
         }
       }
