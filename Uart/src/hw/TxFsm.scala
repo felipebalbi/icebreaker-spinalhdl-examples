@@ -6,15 +6,15 @@ import spinal.lib.fsm._
 
 /** UART transmit frame sequencer (the "control" half of the TX path).
   *
-  * Sequences the line through
-  * `Idle → Start → Data×N → [Parity] → Stop×M → Idle`, one bit boundary per
-  * [[BaudGenerator]] tick. Knows nothing about how the tick is generated,
-  * nothing about how the byte is stored ([[TxShiftReg]]), and nothing about the
-  * byte-stream handshake — all three concerns live in [[UartTx]] which wires
-  * this FSM, the baud generator, and the shift register together.
+  * Sequences the line through `Idle → Start → Data×N → [Parity] → Stop×M →
+  * Idle`, one bit boundary per [[BaudGenerator]] tick. Knows nothing about how
+  * the tick is generated, nothing about how the byte is stored
+  * ([[TxShiftReg]]), and nothing about the byte-stream handshake — all three
+  * concerns live in [[UartTx]] which wires this FSM, the baud generator, and
+  * the shift register together.
   *
-  * Frame on the wire (8N1 by default; parity slot present only when
-  * `cfg.parity != ParityType.None`):
+  * Frame on the wire (8N1 by default; parity slot present only when `cfg.parity
+  * != ParityType.None`):
   * {{{
   *   idle   : line stays high
   *   start  : single low bit, one bit period long
@@ -67,7 +67,7 @@ import spinal.lib.fsm._
   * (which is also how a real UART RX recovers data).
   *
   * ==Why `txBit` is registered, and why every state drives it from
-  * `whenIsActive` (not `onEntry`)==
+ `whenIsActive` (not `onEntry`)==
   *
   * `txBit` is driven from a register (`txReg`), not a combinational mux over
   * state and `shiftRegBit`. Either would be functionally correct, but the

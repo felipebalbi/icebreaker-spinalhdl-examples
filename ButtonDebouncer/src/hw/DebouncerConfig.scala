@@ -4,10 +4,10 @@ import spinal.core._
 
 /** Closed set of debouncer implementations.
   *
-  * Members are added to this `SpinalEnum` (rather than a vanilla Scala
-  * `enum`) so the same value can later be promoted to a hardware signal
-  * if we ever want a runtime-selectable debouncer mux. For now it is
-  * only consumed at elaboration time by [[Debouncer.apply]].
+  * Members are added to this `SpinalEnum` (rather than a vanilla Scala `enum`)
+  * so the same value can later be promoted to a hardware signal if we ever want
+  * a runtime-selectable debouncer mux. For now it is only consumed at
+  * elaboration time by [[Debouncer.apply]].
   */
 object DebounceKind extends SpinalEnum {
   val Integrator, Timer = newElement()
@@ -19,8 +19,8 @@ object DebounceKind extends SpinalEnum {
   *   - `kind` selects which concrete subclass to instantiate.
   *   - The remaining parameters are read by *some* but not all subclasses
   *     (`width` is integrator-only; `clkFreqHz`/`debounceMs` are timer-only).
-  *     Carrying them all in one `case class` keeps the call site simple at
-  *     the cost of a few unused defaults — acceptable for a teaching example.
+  *     Carrying them all in one `case class` keeps the call site simple at the
+  *     cost of a few unused defaults — acceptable for a teaching example.
   *
   * @param kind
   *   which `Debouncer` subclass to instantiate.
@@ -32,8 +32,8 @@ object DebounceKind extends SpinalEnum {
   *   system clock frequency in Hz, used by [[TimerDebouncer]] to size its
   *   countdown.
   * @param debounceMs
-  *   debounce window in milliseconds, used by [[TimerDebouncer]]. ~10 ms is
-  *   the canonical "tactile button" choice.
+  *   debounce window in milliseconds, used by [[TimerDebouncer]]. ~10 ms is the
+  *   canonical "tactile button" choice.
   */
 case class DebouncerConfig(
     kind: DebounceKind.E,

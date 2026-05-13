@@ -11,17 +11,15 @@ import spinal.core.sim._
   * rounded phaseInc gives an essentially exact 10-cycle average period.
   *
   * What we check
-  *   1. With `enable = false`, no ticks ever appear.
-  *   2. After raising `enable`, the *first* tick lands within [ticksPerBit,
-  *      ticksPerBit + 1] cycles (DDS jitter is ±1 cycle, plus 1 cycle for the
-  *      registered tick output).
-  *   3. Subsequent inter-tick spacings stay within {ticksPerBit-1, ticksPerBit,
-  *      ticksPerBit+1} cycles.
-  *   4. Each tick is exactly one cycle wide.
-  *   5. The *average* spacing over many ticks matches `ticksPerBit` to within a
-  *      small tolerance — proving DDS accuracy.
-  *   6. Dropping `enable` cleanly stops ticks; re-enabling restarts the cadence
-  *      from a known phase.
+  *   1. With `enable = false`, no ticks ever appear. 2. After raising `enable`,
+  *      the *first* tick lands within [ticksPerBit, ticksPerBit + 1] cycles
+  *      (DDS jitter is ±1 cycle, plus 1 cycle for the registered tick output).
+  *      3. Subsequent inter-tick spacings stay within {ticksPerBit-1,
+  *         ticksPerBit, ticksPerBit+1} cycles. 4. Each tick is exactly one
+  *         cycle wide. 5. The *average* spacing over many ticks matches
+  *         `ticksPerBit` to within a small tolerance — proving DDS accuracy. 6.
+  *         Dropping `enable` cleanly stops ticks; re-enabling restarts the
+  *         cadence from a known phase.
   *
   * Run: `sbt "runMain uart.BaudGeneratorSim"`
   */

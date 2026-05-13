@@ -11,7 +11,7 @@ import spinal.lib.bus.regif.AccessType._
   * regif-generated register file that doubles as machine-readable
   * documentation.
   *
-  * == Why this exists ==
+  * ==Why this exists==
   *
   * The streaming [[UartTx]] / [[UartRx]] cores are deliberately portable: they
   * present Stream handshakes, expose error pulses, and know nothing about a
@@ -21,16 +21,16 @@ import spinal.lib.bus.regif.AccessType._
   * STM32-style: TXDATA, RXDATA, STATUS, ISR/IER, BAUD, CONFIG) and adds:
   *
   *   - **TX/RX FIFOs** sized independently by `cfg.txFifoDepth` and
-  *     `cfg.rxFifoDepth` (defaults 16 each). A brief APB stall can no
-  *     longer overrun the line.
+  *     `cfg.rxFifoDepth` (defaults 16 each). A brief APB stall can no longer
+  *     overrun the line.
   *   - **Runtime baud**: BAUD is a writable register driving the DDS phase
   *     increment. Reset value matches `cfg.baudRate` at `cfg.clkFreqHz`.
-  *   - **Sticky errors** with W1C clear semantics, so firmware never has
-  *     to race the hardware to catch a single-cycle error pulse.
+  *   - **Sticky errors** with W1C clear semantics, so firmware never has to
+  *     race the hardware to catch a single-cycle error pulse.
   *   - **A maskable interrupt** OR-reduced over the framing/parity/overrun
   *     events, mirroring the 16550 IIR behaviour.
   *
-  * == Address map ==
+  * ==Address map==
   * {{{
   *   0x00 REVISION        RO   IP version, sourced from the Makefile.
   *                             [31:24]=major [23:16]=minor [15:0]=patch
@@ -63,23 +63,23 @@ import spinal.lib.bus.regif.AccessType._
   *                             live on the FIFO_STATUS registers, not here.
   * }}}
   *
-  * == Hardware datasheet ==
+  * ==Hardware datasheet==
   *
-  * This Component carries the regif metadata that drives `make docs` —
-  * running `sbt "runMain uart.UartControllerDocs"` produces an HTML
-  * datasheet (`gen/uart_controller.html`), a C header
-  * (`gen/uart_controller.h`) for firmware, plus JSON / RALF / SystemRDL
-  * for any verification tooling.
+  * This Component carries the regif metadata that drives `make docs` — running
+  * `sbt "runMain uart.UartControllerDocs"` produces an HTML datasheet
+  * (`gen/uart_controller.html`), a C header (`gen/uart_controller.h`) for
+  * firmware, plus JSON / RALF / SystemRDL for any verification tooling.
   *
   * @param cfg
-  *   Compile-time UART configuration. `cfg.baudRate` and `cfg.clkFreqHz`
-  *   become the *reset* values of BAUD; `cfg.dataBits`, `cfg.parity`,
-  *   `cfg.stopBits`, `cfg.txFifoDepth` and `cfg.rxFifoDepth` shape the
-  *   build (they are NOT runtime-tunable in this version — the format
-  *   bits show up read-only in CFG_INFO; the FIFO depths show up in the
-  *   per-side FIFO_STATUS registers).
+  *   Compile-time UART configuration. `cfg.baudRate` and `cfg.clkFreqHz` become
+  *   the *reset* values of BAUD; `cfg.dataBits`, `cfg.parity`, `cfg.stopBits`,
+  *   `cfg.txFifoDepth` and `cfg.rxFifoDepth` shape the build (they are NOT
+  *   runtime-tunable in this version — the format bits show up read-only in
+  *   CFG_INFO; the FIFO depths show up in the per-side FIFO_STATUS registers).
   */
-case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = false)) extends Component {
+case class UartController(
+    cfg: UartConfig = UartConfig(useCts = false, useRts = false)
+) extends Component {
   require(
     !cfg.useCts && !cfg.useRts,
     "UartController v1 does not wire CTS/RTS; use cfg.useCts = false and cfg.useRts = false"
@@ -87,9 +87,9 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
 
   /** APB3 configuration: 8-bit byte-addressed, 32-bit data, no PSLVERR.
     *
-    * 8 address bits is more than enough for the eight 4-byte registers we
-    * own — gives 256 bytes of address space — and keeps the externally
-    * visible address signal small. Increase only if more registers land.
+    * 8 address bits is more than enough for the eight 4-byte registers we own —
+    * gives 256 bytes of address space — and keeps the externally visible
+    * address signal small. Increase only if more registers land.
     */
   val apb3Config = Apb3Config(
     addressWidth = 8,
@@ -100,8 +100,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
 
   val io = new Bundle {
 
-    /** APB3 slave port. Wire to whichever bus master fronts it (a soft CPU,
-      * a bus-master FSM, an external test driver via `Apb3Driver`, …).
+    /** APB3 slave port. Wire to whichever bus master fronts it (a soft CPU, a
+      * bus-master FSM, an external test driver via `Apb3Driver`, …).
       */
     val apb = slave(Apb3(apb3Config))
 
@@ -112,8 +112,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
     val tx = out Bool ()
 
     /** Aggregate active-high interrupt: OR(ISR & IER) when CTRL.enable = 1.
-      * Wire to the host's interrupt controller, or leave dangling for a
-      * polled bring-up.
+      * Wire to the host's interrupt controller, or leave dangling for a polled
+      * bring-up.
       */
     val irq = out Bool ()
   }
@@ -161,10 +161,14 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   // (REVISION_{MAJOR,MINOR,PATCH}); see [[Revision]] for the read /
   // default policy.
 
-  val REVISION = busif.newReg(doc = "IP revision (major.minor.patch), read-only")
-  val revPatch = REVISION.field(UInt(16 bits), RO, doc = "Patch version (16 bits, [15:0]).")
-  val revMinor = REVISION.field(UInt(8 bits), RO, doc = "Minor version (8 bits, [23:16]).")
-  val revMajor = REVISION.field(UInt(8 bits), RO, doc = "Major version (8 bits, [31:24]).")
+  val REVISION =
+    busif.newReg(doc = "IP revision (major.minor.patch), read-only")
+  val revPatch =
+    REVISION.field(UInt(16 bits), RO, doc = "Patch version (16 bits, [15:0]).")
+  val revMinor =
+    REVISION.field(UInt(8 bits), RO, doc = "Minor version (8 bits, [23:16]).")
+  val revMajor =
+    REVISION.field(UInt(8 bits), RO, doc = "Major version (8 bits, [31:24]).")
 
   revPatch := U(Revision.patch, 16 bits)
   revMinor := U(Revision.minor, 8 bits)
@@ -183,13 +187,15 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
     Bool(),
     RW,
     1,
-    doc = "Enable TX FIFO drain into UartTx. 0 = bytes still accepted into FIFO but no transmission happens."
+    doc =
+      "Enable TX FIFO drain into UartTx. 0 = bytes still accepted into FIFO but no transmission happens."
   )
   val ctrlRxEnable = CTRL.field(
     Bool(),
     RW,
     1,
-    doc = "Enable RX FIFO push from UartRx. 0 = received bytes are dropped on the floor."
+    doc =
+      "Enable RX FIFO push from UartRx. 0 = received bytes are dropped on the floor."
   )
 
   // STATUS ----------------------------------------------------------------
@@ -228,7 +234,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   val isrParity = ISR.field(
     Bool(),
     W1C,
-    doc = "Parity bit didn't match data parity. Only meaningful when CFG_INFO.parity != None."
+    doc =
+      "Parity bit didn't match data parity. Only meaningful when CFG_INFO.parity != None."
   )
   val isrOverrun = ISR.field(
     Bool(),
@@ -238,7 +245,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   val isrTxDone = ISR.field(
     Bool(),
     W1C,
-    doc = "TX FIFO transitioned from non-empty to empty (the last queued byte completed)."
+    doc =
+      "TX FIFO transitioned from non-empty to empty (the last queued byte completed)."
   )
   val isrRxDone = ISR.field(
     Bool(),
@@ -247,8 +255,10 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   )
 
   val IER = busif.newReg(doc = "Interrupt enable (mask, RW)")
-  val ierFraming = IER.field(Bool(), RW, 0, doc = "Enable framing-error interrupt.")
-  val ierParity = IER.field(Bool(), RW, 0, doc = "Enable parity-error interrupt.")
+  val ierFraming =
+    IER.field(Bool(), RW, 0, doc = "Enable framing-error interrupt.")
+  val ierParity =
+    IER.field(Bool(), RW, 0, doc = "Enable parity-error interrupt.")
   val ierOverrun = IER.field(Bool(), RW, 0, doc = "Enable overrun interrupt.")
   val ierTxDone = IER.field(Bool(), RW, 0, doc = "Enable TX-done interrupt.")
   val ierRxDone = IER.field(Bool(), RW, 0, doc = "Enable RX-done interrupt.")
@@ -299,7 +309,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
     UInt(accWidth bits),
     RW,
     baudResetValue,
-    doc = "phaseInc = round(baudRate * 2^24 / clkFreqHz). The RX side uses phaseInc * oversample internally."
+    doc =
+      "phaseInc = round(baudRate * 2^24 / clkFreqHz). The RX side uses phaseInc * oversample internally."
   )
 
   // Drive both cores' baud generators from the BAUD register. RX runs
@@ -330,11 +341,31 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   //                     two sides may be sized independently.
 
   val TX_FIFO_STATUS = busif.newReg(doc = "TX FIFO status (read-only)")
-  val txFifoFull = TX_FIFO_STATUS.field(Bool(), RO, doc = "TX FIFO is full; further TXDATA writes are dropped silently.")
-  val txFifoEmpty = TX_FIFO_STATUS.field(Bool(), RO, doc = "TX FIFO is empty (the line will go idle once any in-flight frame finishes).")
+  val txFifoFull =
+    TX_FIFO_STATUS.field(
+      Bool(),
+      RO,
+      doc = "TX FIFO is full; further TXDATA writes are dropped silently."
+    )
+  val txFifoEmpty = TX_FIFO_STATUS.field(
+    Bool(),
+    RO,
+    doc =
+      "TX FIFO is empty (the line will go idle once any in-flight frame finishes)."
+  )
   TX_FIFO_STATUS.reserved(6 bits)
-  val txFifoCount = TX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Bytes currently queued in the TX FIFO (0..txFifoDepth).")
-  val txFifoDepth = TX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Synth-time TX FIFO capacity in bytes (= cfg.txFifoDepth).")
+  val txFifoCount =
+    TX_FIFO_STATUS.field(
+      UInt(8 bits),
+      RO,
+      doc = "Bytes currently queued in the TX FIFO (0..txFifoDepth)."
+    )
+  val txFifoDepth =
+    TX_FIFO_STATUS.field(
+      UInt(8 bits),
+      RO,
+      doc = "Synth-time TX FIFO capacity in bytes (= cfg.txFifoDepth)."
+    )
 
   txFifoFull := !txFifo.io.push.ready
   txFifoEmpty := !txFifo.io.pop.valid
@@ -342,11 +373,32 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   txFifoDepth := U(cfg.txFifoDepth, 8 bits)
 
   val RX_FIFO_STATUS = busif.newReg(doc = "RX FIFO status (read-only)")
-  val rxFifoFull = RX_FIFO_STATUS.field(Bool(), RO, doc = "RX FIFO is full; the next received byte will trigger an overrun.")
-  val rxFifoEmpty = RX_FIFO_STATUS.field(Bool(), RO, doc = "RX FIFO is empty; firmware should poll for !empty before reading RXDATA.")
+  val rxFifoFull =
+    RX_FIFO_STATUS.field(
+      Bool(),
+      RO,
+      doc = "RX FIFO is full; the next received byte will trigger an overrun."
+    )
+  val rxFifoEmpty =
+    RX_FIFO_STATUS.field(
+      Bool(),
+      RO,
+      doc =
+        "RX FIFO is empty; firmware should poll for !empty before reading RXDATA."
+    )
   RX_FIFO_STATUS.reserved(6 bits)
-  val rxFifoCount = RX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Bytes currently queued in the RX FIFO (0..rxFifoDepth).")
-  val rxFifoDepth = RX_FIFO_STATUS.field(UInt(8 bits), RO, doc = "Synth-time RX FIFO capacity in bytes (= cfg.rxFifoDepth).")
+  val rxFifoCount =
+    RX_FIFO_STATUS.field(
+      UInt(8 bits),
+      RO,
+      doc = "Bytes currently queued in the RX FIFO (0..rxFifoDepth)."
+    )
+  val rxFifoDepth =
+    RX_FIFO_STATUS.field(
+      UInt(8 bits),
+      RO,
+      doc = "Synth-time RX FIFO capacity in bytes (= cfg.rxFifoDepth)."
+    )
 
   rxFifoFull := !rxFifo.io.push.ready
   rxFifoEmpty := !rxFifo.io.pop.valid
@@ -374,10 +426,17 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   }
 
   val CFG_INFO = busif.newReg(doc = "Build-time configuration (read-only)")
-  val cfgInfoDataBits = CFG_INFO.field(UInt(4 bits), RO, doc = "dataBits - 1 (so 8N1 reads as 7).")
-  val cfgInfoStopBits = CFG_INFO.field(UInt(2 bits), RO, doc = "Number of stop bits (1 or 2).")
-  val cfgInfoParity = CFG_INFO.field(UInt(2 bits), RO, doc = "Parity: 0=None 1=Even 2=Odd.")
-  val cfgInfoOsShift = CFG_INFO.field(UInt(4 bits), RO, doc = "log2(oversample); RX baudgen runs phaseInc << this.")
+  val cfgInfoDataBits =
+    CFG_INFO.field(UInt(4 bits), RO, doc = "dataBits - 1 (so 8N1 reads as 7).")
+  val cfgInfoStopBits =
+    CFG_INFO.field(UInt(2 bits), RO, doc = "Number of stop bits (1 or 2).")
+  val cfgInfoParity =
+    CFG_INFO.field(UInt(2 bits), RO, doc = "Parity: 0=None 1=Even 2=Odd.")
+  val cfgInfoOsShift = CFG_INFO.field(
+    UInt(4 bits),
+    RO,
+    doc = "log2(oversample); RX baudgen runs phaseInc << this."
+  )
 
   cfgInfoDataBits := U(cfg.dataBits - 1, 4 bits)
   cfgInfoStopBits := U(cfg.stopBits, 2 bits)
@@ -391,7 +450,10 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
   // TXDATA's address pulses fifo.io.push.valid for one cycle.
 
   val txDataWriteHit =
-    busif.doWrite && (busif.writeAddress() === U(TXDATA.getAddr(), busif.writeAddress().getWidth bits))
+    busif.doWrite && (busif.writeAddress() === U(
+      TXDATA.getAddr(),
+      busif.writeAddress().getWidth bits
+    ))
   txFifo.io.push.valid := txDataWriteHit
   // Pull the byte from the live bus write data rather than the stored
   // field — the field's stored value updates one cycle late, but
@@ -414,7 +476,8 @@ case class UartController(cfg: UartConfig = UartConfig(useCts = false, useRts = 
 
   // ----- RX FIFO pop glue -------------------------------------------------
 
-  val rxDataReadHit = busif.doRead && (busif.readAddress() === U(RXDATA.getAddr(), busif.writeAddress().getWidth bits))
+  val rxDataReadHit = busif.doRead && (busif
+    .readAddress() === U(RXDATA.getAddr(), busif.writeAddress().getWidth bits))
   rxFifo.io.pop.ready := rxDataReadHit && rxFifo.io.pop.valid
 
   // ----- IRQ aggregation --------------------------------------------------
@@ -441,10 +504,10 @@ object UartControllerVerilog {
   * documentation alongside the Verilog. Outputs in `gen/`:
   *
   *   - `uart_controller.html` — datasheet table
-  *   - `uart_controller.h`    — C header (offsets / shifts / masks)
+  *   - `uart_controller.h` — C header (offsets / shifts / masks)
   *   - `uart_controller.json` — machine-readable register map
   *   - `uart_controller.ralf` — UVM RALF for verification
-  *   - `uart_controller.rdl`  — SystemRDL
+  *   - `uart_controller.rdl` — SystemRDL
   *
   * Run with `make docs`.
   */

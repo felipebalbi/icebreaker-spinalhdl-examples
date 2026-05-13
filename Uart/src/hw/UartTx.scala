@@ -62,9 +62,9 @@ case class UartTx(cfg: UartConfig) extends Component {
       */
     val cts = cfg.useCts generate (in Bool ())
 
-    /** DDS phase increment for the internal baud generator. Wire to a
-      * constant for fixed-baud builds (use [[BaudGenerator.phaseIncFor]]),
-      * or to a CSR field for runtime baud (see [[UartController]]).
+    /** DDS phase increment for the internal baud generator. Wire to a constant
+      * for fixed-baud builds (use [[BaudGenerator.phaseIncFor]]), or to a CSR
+      * field for runtime baud (see [[UartController]]).
       */
     val baudPhaseInc = in UInt (BaudGenerator.defaultAccWidth bits)
   }

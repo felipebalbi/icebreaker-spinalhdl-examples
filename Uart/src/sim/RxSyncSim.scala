@@ -10,32 +10,31 @@ import scala.collection.mutable.ArrayBuffer
   * Strategy `RxSync` is a depth-2 [[spinal.lib.BufferCC]] chain, so the
   * behavioural property we care about is exactly:
   *
-  *   `syncOut(k) == asyncIn(k - 2)` for every cycle k after reset, with
-  *   `syncOut(k) == true` for k < 2 (the `init = True` value persists until
-  *   the first two real edges have shifted things in).
+  * `syncOut(k) == asyncIn(k - 2)` for every cycle k after reset, with
+  * `syncOut(k) == true` for k < 2 (the `init = True` value persists until the
+  * first two real edges have shifted things in).
   *
   * That single invariant captures both "exactly 2-cycle latency" and "no
-  * transition is dropped, duplicated, or reordered". The cleanest way to
-  * verify it without getting tangled in stimulus-thread timing semantics
-  * (`asyncIn #= X` followed immediately by `waitSampling()` does not always
-  * make `X` observable in FF1 within the same delta — see the long-standing
-  * "settle" cycle in `TxShiftRegSim.loadByte` for the same gotcha) is to
-  * record signal values inside an `onSamplings` callback, which fires
-  * post-edge with both inputs and registers committed, and then post-validate
-  * the recorded sequence.
+  * transition is dropped, duplicated, or reordered". The cleanest way to verify
+  * it without getting tangled in stimulus-thread timing semantics (`asyncIn #=
+  * X` followed immediately by `waitSampling()` does not always make `X`
+  * observable in FF1 within the same delta — see the long-standing "settle"
+  * cycle in `TxShiftRegSim.loadByte` for the same gotcha) is to record signal
+  * values inside an `onSamplings` callback, which fires post-edge with both
+  * inputs and registers committed, and then post-validate the recorded
+  * sequence.
   *
   * What we check
   *   1. **Post-reset idle.** With `asyncIn` driven low *during* reset,
   *      `syncOut` must remain high — proving that `init = True` wins over
   *      whatever junk happens to be on the asynchronous input pin while the
-  *      board is coming out of reset.
-  *   2. **The 2-cycle invariant.** Over a deliberately diverse stimulus
-  *      sequence — single rising and falling edges, 1-cycle high and low
-  *      pulses, long runs of 0 and 1, and a 500-cycle random stream —
-  *      `syncOut(k) == asyncIn(k-2)` must hold for every recorded cycle. If
-  *      latency is ever 1 or 3 cycles (regression on bufferDepth), or any
-  *      transition is lost (a "clever" synchronizer that swallows
-  *      sub-bit-period pulses), or any transition is duplicated, the
+  *      board is coming out of reset. 2. **The 2-cycle invariant.** Over a
+  *      deliberately diverse stimulus sequence — single rising and falling
+  *      edges, 1-cycle high and low pulses, long runs of 0 and 1, and a
+  *      500-cycle random stream — `syncOut(k) == asyncIn(k-2)` must hold for
+  *      every recorded cycle. If latency is ever 1 or 3 cycles (regression on
+  *      bufferDepth), or any transition is lost (a "clever" synchronizer that
+  *      swallows sub-bit-period pulses), or any transition is duplicated, the
   *      invariant fires immediately at the offending index.
   *
   * Run: `sbt "runMain uart.RxSyncSim"`

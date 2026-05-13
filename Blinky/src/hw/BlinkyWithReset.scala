@@ -6,8 +6,8 @@ import spinal.core._
   * in addition to the board clock.
   *
   * The reset is wired to the iCEbreaker user button via `icebreaker-reset.pcf`
-  * (pin 10). The button pulls the line high through a pull-up and shorts it
-  * to ground when pressed, so "reset asserted" means the pin is at 0 V — hence
+  * (pin 10). The button pulls the line high through a pull-up and shorts it to
+  * ground when pressed, so "reset asserted" means the pin is at 0 V — hence
   * `resetActiveLevel = LOW`. The button is not synchronous to anything, so
   * `resetKind = ASYNC` (Spinal still synchronises the *deassertion* via a
   * BufferCC on the reset path).
@@ -15,8 +15,9 @@ import spinal.core._
   * The toplevel ports map cleanly to PCF entries: `io_clk`, `io_reset`,
   * `io_led`.
   *
-  * @param counterWidth Width of the divider counter. See [[Blinky]] for the
-  *                     synthesis vs. simulation trade-off.
+  * @param counterWidth
+  *   Width of the divider counter. See [[Blinky]] for the synthesis vs.
+  *   simulation trade-off.
   */
 case class BlinkyWithReset(counterWidth: Int = 25) extends Component {
   val io = new Bundle {

@@ -6,16 +6,16 @@ import spinal.core.sim._
 /** End-to-end smoke sim for [[ButtonTop]].
   *
   * Wires up the full top with a small Timer debouncer (8-cycle window) and
-  * verifies the headline behaviour: bouncy presses produce *one* LED
-  * toggle each, not many.
+  * verifies the headline behaviour: bouncy presses produce *one* LED toggle
+  * each, not many.
   *
   * Strategy
-  *   - Construct `ButtonTop` with `DebouncerConfig(Timer, ...)` sized for
-  *     a quick sim (window = 8 cycles).
+  *   - Construct `ButtonTop` with `DebouncerConfig(Timer, ...)` sized for a
+  *     quick sim (window = 8 cycles).
   *   - Drive a bouncy "press": several fast toggles followed by a long
   *     steady-high. Assert the LED toggles exactly once.
-  *   - Drive a bouncy "release": same shape but ending steady-low. Assert
-  *     the LED does NOT toggle (rising-edge only).
+  *   - Drive a bouncy "release": same shape but ending steady-low. Assert the
+  *     LED does NOT toggle (rising-edge only).
   *   - Repeat to confirm the toggle parity tracks the press count.
   *
   * Run: `sbt "runMain button_debouncer.ButtonTopSim"`

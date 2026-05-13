@@ -7,14 +7,14 @@ import spinal.core.sim._
 /** Sim-only Component that wires two `I2cIo` slaves through a perfect
   * wired-AND.
   *
-  * Models the electrical reality of an I²C segment: any device pulling
-  * the line low wins, otherwise the external pull-up holds it high.
-  * With `ReadableOpenDrain.write = False` meaning "pull low", the
-  * combinational rule is simply `bus = a.write & b.write`.
+  * Models the electrical reality of an I²C segment: any device pulling the line
+  * low wins, otherwise the external pull-up holds it high. With
+  * `ReadableOpenDrain.write = False` meaning "pull low", the combinational rule
+  * is simply `bus = a.write & b.write`.
   *
-  * Reused by every later sim that needs to glue a controller and a
-  * target together (`I2cBitControllerSim`, `I2cTargetFsmSim`, …)
-  * without reaching for an external chip model.
+  * Reused by every later sim that needs to glue a controller and a target
+  * together (`I2cBitControllerSim`, `I2cTargetFsmSim`, …) without reaching for
+  * an external chip model.
   */
 class I2cIoBus extends Component {
   val io = new Bundle {
@@ -32,18 +32,18 @@ class I2cIoBus extends Component {
 /** Smoke-test [[I2cIo]] + [[I2cIoBus]].
   *
   * Most of `I2cIo` is wires, so this sim has two jobs:
-  *   1. Confirm the wired-AND model in `I2cIoBus` matches the truth
-  *      table for an open-drain segment with two participants.
-  *   2. Exercise the `I2cIoBus` helper itself, since every later sim
-  *      depends on it being correct.
+  *   1. Confirm the wired-AND model in `I2cIoBus` matches the truth table for
+  *      an open-drain segment with two participants.
+  *   2. Exercise the `I2cIoBus` helper itself, since every later sim depends on
+  *      it being correct.
   *
   * What we check
-  *   - Both ends release      → both lines high.
-  *   - One end pulls SCL      → SCL low, SDA high.
-  *   - Other end pulls SDA    → SDA low, SCL high.
-  *   - Both ends pull both    → both low (no contention; that's the
-  *     wired-AND rule, not a bug).
-  *   - Mixed pulls            → both low.
+  *   - Both ends release → both lines high.
+  *   - One end pulls SCL → SCL low, SDA high.
+  *   - Other end pulls SDA → SDA low, SCL high.
+  *   - Both ends pull both → both low (no contention; that's the wired-AND
+  *     rule, not a bug).
+  *   - Mixed pulls → both low.
   *   - `releaseAll` shorthand → both lines high.
   *
   * Run: `sbt "runMain i2c.I2cIoSim"`
@@ -57,13 +57,13 @@ object I2cIoSim {
       // sides see the same bus state -- the wired-AND fan-out has to
       // reach every participant.
       def step(
-        aScl: Boolean,
-        aSda: Boolean,
-        bScl: Boolean,
-        bSda: Boolean,
-        expScl: Boolean,
-        expSda: Boolean,
-        label: String
+          aScl: Boolean,
+          aSda: Boolean,
+          bScl: Boolean,
+          bSda: Boolean,
+          expScl: Boolean,
+          expSda: Boolean,
+          label: String
       ): Unit = {
         dut.io.a.scl.write #= aScl
         dut.io.a.sda.write #= aSda

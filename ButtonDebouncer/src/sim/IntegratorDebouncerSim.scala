@@ -8,15 +8,14 @@ import spinal.core.sim._
   * Strategy
   *   - Use a *small* `width` (4 bits => 16-cycle saturation) so the test
   *     finishes quickly.
-  *   - First, feed steady-low for a few cycles to confirm `stable` stays
-  *     low.
+  *   - First, feed steady-low for a few cycles to confirm `stable` stays low.
   *   - Then drive a bouncy signal: many fast 1/0 transitions but with a
   *     net-high duty cycle. Assert `stable` does NOT yet flip.
-  *   - Then drive cleanly high for `>= 2^width` cycles. Assert `stable`
-  *     flips, `rising` pulses for exactly one cycle.
+  *   - Then drive cleanly high for `>= 2^width` cycles. Assert `stable` flips,
+  *     `rising` pulses for exactly one cycle.
   *   - Symmetrically drive cleanly low and check `falling`.
-  *   - Verify `BufferCC` synchroniser latency is accounted for (a few
-  *     cycles after each driven transition).
+  *   - Verify `BufferCC` synchroniser latency is accounted for (a few cycles
+  *     after each driven transition).
   *
   * Run: `sbt "runMain button_debouncer.IntegratorDebouncerSim"`
   */

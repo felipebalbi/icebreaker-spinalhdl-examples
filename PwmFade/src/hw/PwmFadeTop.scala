@@ -16,11 +16,10 @@ import spinal.lib._
   *     stays stable for many PWM periods and the carrier can faithfully
   *     represent it.
   *
-  * Visual breath rate (full triangle):
-  * `(phase_steps_per_ramp * 2) * (prescaler_period / clock_freq)` With
-  * width=12, step=10, prescalerWidth=15, 12 MHz: phase_steps_per_ramp = 4096 /
-  * 10 ~= 410 prescaler_period = 32768 cycles ~= 2.73 ms full breath ~= 410 * 2
-  * * 2.73 ms ~= 2.24 s.
+  * Visual breath rate (full triangle): `(phase_steps_per_ramp * 2) *
+  * (prescaler_period / clock_freq)` With width=12, step=10, prescalerWidth=15,
+  * 12 MHz: phase_steps_per_ramp = 4096 / 10 ~= 410 prescaler_period = 32768
+  * cycles ~= 2.73 ms full breath ~= 410 * 2 * 2.73 ms ~= 2.24 s.
   *
   * `BOOT` reset iCE40 has no global async reset pin; `BOOT` tells SpinalHDL to
   * rely on FPGA cold-start values (the `init(...)` we wrote on each Reg). No
@@ -30,7 +29,8 @@ import spinal.lib._
   * `PwmFadeTopVerilog.main`, `make`, `make flash`. Done. Also see
   * PwmFade/README.md.
   */
-case class PwmFadeTop(cfg: ModulatorConfig, prescalerWidth: Int = 15) extends Component {
+case class PwmFadeTop(cfg: ModulatorConfig, prescalerWidth: Int = 15)
+    extends Component {
   val io = new Bundle {
     val clk = in Bool ()
     val pwm = out Bool ()

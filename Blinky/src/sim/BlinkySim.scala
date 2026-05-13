@@ -5,13 +5,13 @@ import spinal.core.sim._
 
 /** Smoke test for [[Blinky]].
   *
-  * Synthesises the design with a tiny counter (4 bits) so an MSB toggle
-  * occurs every 2^3 = 8 cycles and the test wraps in milliseconds. Runs
-  * long enough to observe at least two MSB transitions and asserts the
-  * counter actually advances.
+  * Synthesises the design with a tiny counter (4 bits) so an MSB toggle occurs
+  * every 2^3 = 8 cycles and the test wraps in milliseconds. Runs long enough to
+  * observe at least two MSB transitions and asserts the counter actually
+  * advances.
   *
-  * The toplevel exposes `io.clk` as an ordinary input rather than the
-  * implicit clock domain, so the testbench drives the clock by hand.
+  * The toplevel exposes `io.clk` as an ordinary input rather than the implicit
+  * clock domain, so the testbench drives the clock by hand.
   */
 object BlinkySim {
   def main(args: Array[String]): Unit = {
@@ -35,7 +35,10 @@ object BlinkySim {
           if (cur != prev) transitions += 1
           prev = cur
         }
-        assert(transitions >= 2, s"led should toggle multiple times, saw $transitions")
+        assert(
+          transitions >= 2,
+          s"led should toggle multiple times, saw $transitions"
+        )
         println(s"OK: Blinky toggled $transitions times in 4 periods")
       }
   }

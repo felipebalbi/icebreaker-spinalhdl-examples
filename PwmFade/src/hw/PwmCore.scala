@@ -5,10 +5,10 @@ import spinal.lib._
 
 /** Counter-comparator PWM generator.
   *
-  * Role The PWM "carrier". Produces `io.pwm` whose duty ratio equals
-  * `io.duty / 2^width`. With `width=12` and a 12 MHz clock the period is 4096
-  * cycles = ~341 us = ~2.93 kHz, well above the eye's flicker-fusion threshold
-  * so an LED looks like a smooth analog brightness.
+  * Role The PWM "carrier". Produces `io.pwm` whose duty ratio equals `io.duty /
+  * 2^width`. With `width=12` and a 12 MHz clock the period is 4096 cycles =
+  * ~341 us = ~2.93 kHz, well above the eye's flicker-fusion threshold so an LED
+  * looks like a smooth analog brightness.
   *
   * How it works A free-running unsigned counter increments every clock cycle
   * and wraps naturally at 2^width (UInt arithmetic in SpinalHDL is modular at

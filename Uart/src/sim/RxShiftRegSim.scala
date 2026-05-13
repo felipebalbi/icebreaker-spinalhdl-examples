@@ -13,52 +13,50 @@ import scala.collection.mutable.ArrayBuffer
   * input and the resulting register state on every rising edge into parallel
   * `ArrayBuffer`s, then post-validate one invariant over the whole recording.
   *
-  * The invariant is the block's behavioural contract written directly in
-  * code: a tiny reference register that we step over the recorded `(clear,
-  * shift, sample)` stream, asserting at every edge that the recorded
-  * `data` matches what the contract says it should be. Because both halves
-  * of the comparison come from the same `onSamplings` snapshot, there is no
-  * way for stimulus-thread timing to skew them.
+  * The invariant is the block's behavioural contract written directly in code:
+  * a tiny reference register that we step over the recorded `(clear, shift,
+  * sample)` stream, asserting at every edge that the recorded `data` matches
+  * what the contract says it should be. Because both halves of the comparison
+  * come from the same `onSamplings` snapshot, there is no way for
+  * stimulus-thread timing to skew them.
   *
   * What the contract says
   *   - At edge k: if `clear(k)` is high, the new register value is 0.
-  *   - Else if `shift(k)` is high, the new value is
-  *     `sample(k) ## prev(N-1 downto 1)`.
+  *   - Else if `shift(k)` is high, the new value is `sample(k) ## prev(N-1
+  *     downto 1)`.
   *   - Else, the register holds (`new == prev`).
   *   - `data(k)` == new register value (combinational view).
   *
   * Coverage
-  *   1. **Full byte sweep at 8N1.** Send every value `0x00..0xFF` through
-  *      the register one frame at a time, with a `clear` pulse between
-  *      frames, and verify the assembled byte matches. Catches any
-  *      bit-ordering bug (LSB-first vs. MSB-first), any off-by-one in the
-  *      shift slice, any "forgot to clear" leakage between frames.
-  *   2. **`dataBits` sweep.** Repeat a smaller pattern set across all
-  *      configured widths (5..9). Confirms the slice
-  *      `cfg.dataBits - 1 downto 1` parameterises correctly.
-  *   3. **Clear-wins-over-shift.** Drive `clear=1` AND `shift=1` in the
-  *      same cycle with `sample=1`. The new value must be 0 (clear wins),
-  *      not `1 ## prev[N-1:1]`. Then immediately drive `shift=1` alone
-  *      with `sample=1` and verify the new value is `1 ## 0[N-1:1]` —
-  *      proves the FSM contract "clear-then-shift on separate cycles" is
-  *      what's actually implemented.
-  *   4. **Hold.** With both inputs low for many cycles after a partial
-  *      load, the register must not change. The recorder/invariant catches
-  *      this implicitly (any change without `clear` or `shift` violates
-  *      the contract), but we also do an explicit before/after comparison
-  *      so the failure message is direct.
-  *   5. **Randomised burst stream.** A few hundred edges of random
-  *      `(clear, shift, sample)` with biased probabilities (clear rare,
-  *      shift common). Most bugs that survive the structured tests will
-  *      fall out here.
+  *   1. **Full byte sweep at 8N1.** Send every value `0x00..0xFF` through the
+  *      register one frame at a time, with a `clear` pulse between frames, and
+  *      verify the assembled byte matches. Catches any bit-ordering bug
+  *      (LSB-first vs. MSB-first), any off-by-one in the shift slice, any
+  *      "forgot to clear" leakage between frames. 2. **`dataBits` sweep.**
+  *      Repeat a smaller pattern set across all configured widths (5..9).
+  *      Confirms the slice `cfg.dataBits - 1 downto 1` parameterises correctly.
+  *      3. **Clear-wins-over-shift.** Drive `clear=1` AND `shift=1` in the same
+  *         cycle with `sample=1`. The new value must be 0 (clear wins), not `1
+  *         ## prev[N-1:1]`. Then immediately drive `shift=1` alone with
+  *         `sample=1` and verify the new value is `1 ## 0[N-1:1]` — proves the
+  *         FSM contract "clear-then-shift on separate cycles" is what's
+  *         actually implemented.
+  *      4. **Hold.** With both inputs low for many cycles after a partial load,
+  *         the register must not change. The recorder/invariant catches this
+  *         implicitly (any change without `clear` or `shift` violates the
+  *         contract), but we also do an explicit before/after comparison so the
+  *         failure message is direct. 5. **Randomised burst stream.** A few
+  *         hundred edges of random `(clear, shift, sample)` with biased
+  *         probabilities (clear rare, shift common). Most bugs that survive the
+  *         structured tests will fall out here.
   *
   * Run: `sbt "runMain uart.RxShiftRegSim"`
   */
 object RxShiftRegSim {
   def main(args: Array[String]): Unit = {
 
-    /** Run one test pass with a given dataBits width. Returns when the
-      * sim's body completes; failures throw out of the assert calls.
+    /** Run one test pass with a given dataBits width. Returns when the sim's
+      * body completes; failures throw out of the assert calls.
       */
     def runOne(dataBits: Int): Unit = {
       val cfg = UartConfig(dataBits = dataBits)
@@ -117,8 +115,8 @@ object RxShiftRegSim {
           def shiftOnce(bit: Boolean): Unit = step(false, true, bit)
 
           /** Send one byte of width `dataBits`, LSB first, with a leading
-            * clear. Does not check anything — coverage and the
-            * post-validation invariant do that.
+            * clear. Does not check anything — coverage and the post-validation
+            * invariant do that.
             */
           def sendByte(value: Long): Unit = {
             clearOnce()

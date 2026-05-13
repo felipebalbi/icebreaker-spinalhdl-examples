@@ -22,9 +22,9 @@ import spinal.lib._
   *   - a [[BaudGenerator]] running at `oversample × baudRate` (NOT just
   *     `baudRate`) — see the wiring note below
   *   - an [[RxFsm]] that does start-bit edge detection, half-bit verify for
-  *     glitch rejection, bit-centre sampling, parity check, framing check,
-  *     and overrun detection. The FSM in turn composes an [[RxShiftReg]]
-  *     for byte assembly.
+  *     glitch rejection, bit-centre sampling, parity check, framing check, and
+  *     overrun detection. The FSM in turn composes an [[RxShiftReg]] for byte
+  *     assembly.
   *
   * The Stream handshake on `io.payload` provides natural back-pressure: the
   * FSM's `payloadValidReg` is sticky-until-`fire`, so a slow consumer can take
@@ -33,24 +33,22 @@ import spinal.lib._
   *
   * ==Two non-obvious wiring choices==
   *
-  *   - **BaudGenerator runs at `baudRate × oversample`**, not `baudRate`.
-  *     RxFsm counts oversample ticks per bit (16 by default), so each
-  *     generator tick is one *sub-bit* sample slot. We get that by passing
-  *     the generator a derived config: `cfg.copy(baudRate = baudRate *
-  *     oversample)`. No new generator module needed.
-  *   - **`baud.io.enable := True` (free-running)**, in contrast to
-  *     [[UartTx]] which gates `enable := fsm.io.busy`. The half-bit verify
-  *     after a start-bit edge needs ticks immediately; a `busy`-gated
-  *     generator would have a startup delay right when we can least
-  *     afford it.
+  *   - **BaudGenerator runs at `baudRate × oversample`**, not `baudRate`. RxFsm
+  *     counts oversample ticks per bit (16 by default), so each generator tick
+  *     is one *sub-bit* sample slot. We get that by passing the generator a
+  *     derived config: `cfg.copy(baudRate = baudRate * oversample)`. No new
+  *     generator module needed.
+  *   - **`baud.io.enable := True` (free-running)**, in contrast to [[UartTx]]
+  *     which gates `enable := fsm.io.busy`. The half-bit verify after a
+  *     start-bit edge needs ticks immediately; a `busy`-gated generator would
+  *     have a startup delay right when we can least afford it.
   *
   * ==Error semantics==
   *
-  * The three error flags pulse for one cycle alongside `valid` and clear
-  * the next time the FSM visits its idle state. `valid` is sticky-until-
-  * `fire`. A consumer that takes more than one cycle to acknowledge a byte
-  * must latch the error flags itself on the same cycle as `valid` if it
-  * wants the error info.
+  * The three error flags pulse for one cycle alongside `valid` and clear the
+  * next time the FSM visits its idle state. `valid` is sticky-until- `fire`. A
+  * consumer that takes more than one cycle to acknowledge a byte must latch the
+  * error flags itself on the same cycle as `valid` if it wants the error info.
   *
   * @param cfg
   *   compile-time configuration (clock freq, baud, frame format, oversample,
@@ -59,9 +57,9 @@ import spinal.lib._
 case class UartRx(cfg: UartConfig) extends Component {
   val io = new Bundle {
 
-    /** Serial input line, direct from an FPGA pin. Async to our system
-      * clock - the wrapper passes this straight into RxSync, which crosses it
-      * into our domain via two flops.
+    /** Serial input line, direct from an FPGA pin. Async to our system clock -
+      * the wrapper passes this straight into RxSync, which crosses it into our
+      * domain via two flops.
       */
     val rx = in Bool ()
 
@@ -98,21 +96,21 @@ case class UartRx(cfg: UartConfig) extends Component {
     /** Optional Request-To-Send output, telling the far end's TX that we can
       * accept bytes. Active high.
       *
-      *  Only present when `cfg.useRts` is true. We mirror `payload.ready`
-      *  directly - when the consumer can take a byte,  we tell the sender it's
-      *  safe to send. Note this gives no lead-time before our buffer fills; for
-      *  stricter back-pressure the application layer should drive RTS off a
-      *  "FIFO almost full" signal instead. For 115200-baud bring-up with a
-      *  small FIFO this is fine.
+      * Only present when `cfg.useRts` is true. We mirror `payload.ready`
+      * directly - when the consumer can take a byte, we tell the sender it's
+      * safe to send. Note this gives no lead-time before our buffer fills; for
+      * stricter back-pressure the application layer should drive RTS off a
+      * "FIFO almost full" signal instead. For 115200-baud bring-up with a small
+      * FIFO this is fine.
       *
-      *  Setting `cfg.useRts = false` removes this port entirely.
+      * Setting `cfg.useRts = false` removes this port entirely.
       */
     val rts = cfg.useRts generate (out Bool ())
 
     /** DDS phase increment for the internal baud generator. Note this is the
-      * RX-side increment, which needs to run at `oversample × baudRate` —
-      * use `BaudGenerator.phaseIncFor(clkFreqHz, baudRate * oversample, ...)`
-      * for a fixed-baud build, or shift the controller's TX phaseInc up by
+      * RX-side increment, which needs to run at `oversample × baudRate` — use
+      * `BaudGenerator.phaseIncFor(clkFreqHz, baudRate * oversample, ...)` for a
+      * fixed-baud build, or shift the controller's TX phaseInc up by
       * `log2(oversample)`.
       */
     val baudPhaseInc = in UInt (BaudGenerator.defaultAccWidth bits)

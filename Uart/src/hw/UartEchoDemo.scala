@@ -7,38 +7,34 @@ import spinal.lib.fsm._
 
 /** Minimal hardware echo demo, register-mapped edition.
   *
-  * Same on-the-wire behaviour as the legacy UartEchoDemo (RX byte in →
-  * TX byte out), but the byte plumbing now sits behind a
-  * memory-mapped [[UartController]] instead of touching the streaming
-  * cores directly. This makes the demo a tiny ad-hoc CPU that drives
-  * an APB3 bus — exactly the topology a soft-core (VexRiscv etc.)
-  * would present, just with a dozen-state FSM standing in for the
-  * processor.
+  * Same on-the-wire behaviour as the legacy UartEchoDemo (RX byte in → TX byte
+  * out), but the byte plumbing now sits behind a memory-mapped
+  * [[UartController]] instead of touching the streaming cores directly. This
+  * makes the demo a tiny ad-hoc CPU that drives an APB3 bus — exactly the
+  * topology a soft-core (VexRiscv etc.) would present, just with a dozen-state
+  * FSM standing in for the processor.
   *
-  * Why structure it this way instead of the original direct-Stream
-  * version?
+  * Why structure it this way instead of the original direct-Stream version?
   *
-  *   - Exercises the full [[UartController]] register file end-to-end
-  *     (STATUS poll, RXDATA pop, TXDATA push). If the controller's
-  *     APB read/write address-decode is wrong, this demo silently
-  *     stops echoing — a much sharper bring-up signal than a sim
-  *     pass alone.
-  *   - Same iCEbreaker pin map as before, so the existing pcf and
-  *     `make` / `make flash` flow keeps working.
+  *   - Exercises the full [[UartController]] register file end-to-end (STATUS
+  *     poll, RXDATA pop, TXDATA push). If the controller's APB read/write
+  *     address-decode is wrong, this demo silently stops echoing — a much
+  *     sharper bring-up signal than a sim pass alone.
+  *   - Same iCEbreaker pin map as before, so the existing pcf and `make` /
+  *     `make flash` flow keeps working.
   *
   * On-chip topology:
   *   - [[UartController]] owns the FIFOs, BaudGenerator, and registers
-  *   - this Component is a hand-rolled APB master that polls STATUS,
-  *     reads RXDATA, and writes TXDATA in a loop.
+  *   - this Component is a hand-rolled APB master that polls STATUS, reads
+  *     RXDATA, and writes TXDATA in a loop.
   *
   * Same `ClockDomain` shape as the rest of the project: explicit
   * RISING/ASYNC/active-LOW reset so the iCEbreaker user button works.
   *
   * @param cfg
-  *   Compile-time UART configuration. Defaults to 8N1 with no flow
-  *   control. The UartController's BAUD register is loaded with the
-  *   compile-time-correct phase increment so the demo hits the
-  *   configured baud out of reset.
+  *   Compile-time UART configuration. Defaults to 8N1 with no flow control. The
+  *   UartController's BAUD register is loaded with the compile-time-correct
+  *   phase increment so the demo hits the configured baud out of reset.
   */
 case class UartEchoDemo(
     cfg: UartConfig = UartConfig(useCts = false, useRts = false)
@@ -53,9 +49,8 @@ case class UartEchoDemo(
     /** The board's free-running 12 MHz clock (pcf maps to pin 32). */
     val clk = in Bool ()
 
-    /** Active-LOW reset from the iCEbreaker user button (pcf maps to
-      * pin 10). Pulled high through a pull-up; shorted to ground when
-      * pressed.
+    /** Active-LOW reset from the iCEbreaker user button (pcf maps to pin 10).
+      * Pulled high through a pull-up; shorted to ground when pressed.
       */
     val reset = in Bool ()
 

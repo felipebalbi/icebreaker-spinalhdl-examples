@@ -13,15 +13,14 @@ import spinal.core.sim._
   *     full period had `io.pwm == 1`, and assert it equals `duty` exactly.
   *
   * What we verify
-  *   1. With `duty = 0` the output is permanently low for a full period.
-  *   2. With `duty = 2^width - 1` the output is high for `(2^width - 1)`
-  *      cycles per period (one short of full duty — by design, see PwmTop's
-  *      Scaladoc).
-  *   3. For intermediate values the high-cycle count exactly matches `duty`
-  *      (counter-comparator PWM is cycle-precise once the duty input has
-  *      been stable for at least one full period).
-  *   4. After sweeping, run a continuous ramp so the resulting waveform shows
-  *     a recognisable PWM "fade" pattern.
+  *   1. With `duty = 0` the output is permanently low for a full period. 2.
+  *      With `duty = 2^width - 1` the output is high for `(2^width - 1)` cycles
+  *      per period (one short of full duty — by design, see PwmTop's Scaladoc).
+  *      3. For intermediate values the high-cycle count exactly matches `duty`
+  *         (counter-comparator PWM is cycle-precise once the duty input has
+  *         been stable for at least one full period). 4. After sweeping, run a
+  *         continuous ramp so the resulting waveform shows a recognisable PWM
+  *         "fade" pattern.
   *
   * Run: `sbt "runMain pwm.PwmSim"` (or `make sim`).
   */
@@ -37,8 +36,8 @@ object PwmSim {
         // PwmTop uses Spinal's implicit clock domain.
         dut.clockDomain.forkStimulus(period = 10)
 
-        /** Hold `duty` steady for two full periods (let the counter wrap into
-          * a known phase), then count the high cycles over the *next* period.
+        /** Hold `duty` steady for two full periods (let the counter wrap into a
+          * known phase), then count the high cycles over the *next* period.
           */
         def measureHighCycles(duty: Int): Int = {
           dut.io.duty #= duty

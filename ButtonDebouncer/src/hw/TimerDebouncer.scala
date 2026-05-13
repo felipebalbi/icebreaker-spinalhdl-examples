@@ -8,20 +8,20 @@ import spinal.lib._
   * Strategy
   *   - Cross the async input into the clock domain with `BufferCC`.
   *   - Track a `candidate` value: the most recent value the input took.
-  *     Whenever `btnSync` differs from `candidate`, latch the new value
-  *     and reset a countdown counter.
+  *     Whenever `btnSync` differs from `candidate`, latch the new value and
+  *     reset a countdown counter.
   *   - When the input has held steady at `candidate` for the full
   *     `debounceCycles` window, commit `state := candidate`.
   *
-  * Why this works Any bounce within the window restarts the countdown,
-  * so the `state` register only ever updates after a real `debounceMs`
-  * of stillness. Conceptually identical to the Arduino-style "millis()
-  * since last change" idiom, just expressed in clocked logic.
+  * Why this works Any bounce within the window restarts the countdown, so the
+  * `state` register only ever updates after a real `debounceMs` of stillness.
+  * Conceptually identical to the Arduino-style "millis() since last change"
+  * idiom, just expressed in clocked logic.
   *
   * Sizing
-  *   - `debounceCycles = clkFreqHz / 1000 * debounceMs` gives the count;
-  *     an `if`-guard pins the lower bound at 1 cycle to keep the counter
-  *     width sensible if a degenerate `debounceMs = 0` ever sneaks in.
+  *   - `debounceCycles = clkFreqHz / 1000 * debounceMs` gives the count; an
+  *     `if`-guard pins the lower bound at 1 cycle to keep the counter width
+  *     sensible if a degenerate `debounceMs = 0` ever sneaks in.
   *   - `log2Up(maxCount)` widths the counter exactly; no wasted bits.
   */
 case class TimerDebouncer(

@@ -10,25 +10,25 @@ import spinal.lib._
   * including arbitrarily close to a rising edge. Sampling such a signal
   * directly into a single FF can land it in a metastable state (output stuck
   * between 0 and 1 for some non-zero settling time), which then propagates
-  * through downstream combinational logic and produces wrong but
-  * *intermittent* results. In a UART that surfaces as occasional framing
-  * errors that mysteriously vanish under the scope.
+  * through downstream combinational logic and produces wrong but *intermittent*
+  * results. In a UART that surfaces as occasional framing errors that
+  * mysteriously vanish under the scope.
   *
-  * The fix is the textbook two-FF synchronizer: the first FF may go
-  * metastable, but it has a full clock period to resolve before the second FF
-  * samples it, dropping the probability of a metastable value ever leaving
-  * this block to a negligible MTBF for any reasonable clock rate. Two FFs are
-  * sufficient for the modest clock speeds in this project (12 MHz on the
-  * iCEbreaker); deeper synchronizers only pay off at GHz-class clocks.
+  * The fix is the textbook two-FF synchronizer: the first FF may go metastable,
+  * but it has a full clock period to resolve before the second FF samples it,
+  * dropping the probability of a metastable value ever leaving this block to a
+  * negligible MTBF for any reasonable clock rate. Two FFs are sufficient for
+  * the modest clock speeds in this project (12 MHz on the iCEbreaker); deeper
+  * synchronizers only pay off at GHz-class clocks.
   *
-  * Implementation note — `BufferCC` over `RegNext(RegNext(...))`:
-  * functionally identical (two back-to-back registers) but `BufferCC` is the
-  * SpinalHDL idiomatic primitive for exactly this pattern. It tags the
-  * registers as a clock-domain-crossing chain so synthesis/STA tools that
-  * understand the convention (yosys + nextpnr in our flow, vendor tools in
-  * others) treat the input as a false path rather than reporting bogus setup
-  * violations across an asynchronous boundary. The TODO sketches the manual
-  * form for clarity; we use the named primitive in the code itself.
+  * Implementation note — `BufferCC` over `RegNext(RegNext(...))`: functionally
+  * identical (two back-to-back registers) but `BufferCC` is the SpinalHDL
+  * idiomatic primitive for exactly this pattern. It tags the registers as a
+  * clock-domain-crossing chain so synthesis/STA tools that understand the
+  * convention (yosys + nextpnr in our flow, vendor tools in others) treat the
+  * input as a false path rather than reporting bogus setup violations across an
+  * asynchronous boundary. The TODO sketches the manual form for clarity; we use
+  * the named primitive in the code itself.
   *
   * `init = True` matches the UART idle-line invariant (line idles high). On
   * reset the second FF reads as 1, so any downstream RX FSM that polls
@@ -47,9 +47,9 @@ case class RxSync() extends Component {
       */
     val asyncIn = in Bool ()
 
-    /** Synchronized version of `io.asyncIn`, safe for use anywhere in our
-      * clock domain. Delayed by exactly two cycles. Reads high during reset to
-      * match UART idle-line convention.
+    /** Synchronized version of `io.asyncIn`, safe for use anywhere in our clock
+      * domain. Delayed by exactly two cycles. Reads high during reset to match
+      * UART idle-line convention.
       */
     val syncOut = out Bool ()
   }

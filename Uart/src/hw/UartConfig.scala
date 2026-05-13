@@ -66,13 +66,13 @@ object ParityType extends SpinalEnum {
   *   Depth (in bytes) of the TX FIFO that buffers between any wrapper talking
   *   to [[UartTx]] through a memory-mapped bus (e.g. [[UartController]]) and
   *   the streaming core. 16 is the 16550 default and a comfortable middle
-  *   ground on UP5K BRAM. Independent from `rxFifoDepth` so the two halves
-  *   can be sized for asymmetric traffic patterns (e.g. burst-write logger).
+  *   ground on UP5K BRAM. Independent from `rxFifoDepth` so the two halves can
+  *   be sized for asymmetric traffic patterns (e.g. burst-write logger).
   *   Ignored by the bare [[UartTx]] core — it has no FIFO of its own.
   * @param rxFifoDepth
   *   Depth (in bytes) of the RX FIFO. See `txFifoDepth`. The two depths are
-  *   visible at runtime through their respective `*_FIFO_STATUS.depth`
-  *   fields in [[UartController]].
+  *   visible at runtime through their respective `*_FIFO_STATUS.depth` fields
+  *   in [[UartController]].
   */
 case class UartConfig(
     clkFreqHz: Int = 12000000,
@@ -101,6 +101,12 @@ case class UartConfig(
   require(oversample >= 1, "oversample must be >= 1")
   require(txFifoDepth >= 1, "txFifoDepth must be >= 1")
   require(rxFifoDepth >= 1, "rxFifoDepth must be >= 1")
-  require(txFifoDepth <= 255, "txFifoDepth must fit in the 8-bit TX_FIFO_STATUS.depth field")
-  require(rxFifoDepth <= 255, "rxFifoDepth must fit in the 8-bit RX_FIFO_STATUS.depth field")
+  require(
+    txFifoDepth <= 255,
+    "txFifoDepth must fit in the 8-bit TX_FIFO_STATUS.depth field"
+  )
+  require(
+    rxFifoDepth <= 255,
+    "rxFifoDepth must fit in the 8-bit RX_FIFO_STATUS.depth field"
+  )
 }

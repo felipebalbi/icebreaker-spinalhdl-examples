@@ -4,21 +4,21 @@ import spinal.core._
 
 /** Top-level: clock domain + debouncer + LED toggle on each clean press.
   *
-  * Drop-in replacement for the `Button/` example, but the rising-edge
-  * pulse comes from a [[Debouncer]] instead of a naive sample-and-XOR.
-  * The result is a single LED toggle per real press regardless of how
-  * bouncy the mechanical contact is.
+  * Drop-in replacement for the `Button/` example, but the rising-edge pulse
+  * comes from a [[Debouncer]] instead of a naive sample-and-XOR. The result is
+  * a single LED toggle per real press regardless of how bouncy the mechanical
+  * contact is.
   *
   * Configurability happens entirely at elaboration time via
   * [[DebouncerConfig]]: change `kind` between `Integrator` and `Timer`,
-  * regenerate, reflash, no other code edits required. The two
-  * implementations have visibly different "feel" if you flash them in
-  * sequence — Integrator is snappier on a clean button; Timer is more
-  * forgiving of really chattery contacts.
+  * regenerate, reflash, no other code edits required. The two implementations
+  * have visibly different "feel" if you flash them in sequence — Integrator is
+  * snappier on a clean button; Timer is more forgiving of really chattery
+  * contacts.
   *
-  * Clock domain Same `BOOT`-reset 12 MHz domain as the rest of the
-  * examples. iCE40 has no global async-reset pin; registers cold-start
-  * to their `init(...)` values.
+  * Clock domain Same `BOOT`-reset 12 MHz domain as the rest of the examples.
+  * iCE40 has no global async-reset pin; registers cold-start to their
+  * `init(...)` values.
   */
 case class ButtonTop(cfg: DebouncerConfig) extends Component {
   val io = new Bundle {
@@ -26,8 +26,8 @@ case class ButtonTop(cfg: DebouncerConfig) extends Component {
     /** Free-running 12 MHz clock from the iCEbreaker (pcf maps to pin 35). */
     val clk = in Bool ()
 
-    /** Raw button input (pcf maps to pin 10). Asynchronous, bouncy.
-      * Active-high in this design.
+    /** Raw button input (pcf maps to pin 10). Asynchronous, bouncy. Active-high
+      * in this design.
       */
     val btn = in Bool ()
 

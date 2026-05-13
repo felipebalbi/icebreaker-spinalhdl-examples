@@ -6,11 +6,12 @@ import spinal.core.sim._
 /** Smoke test for [[BlinkyWithReset]].
   *
   * Verifies that:
-  *   1. While reset is asserted (low), the counter stays at 0 and the LED is low.
-  *   2. After deassertion the counter advances and the LED eventually toggles.
+  *   1. While reset is asserted (low), the counter stays at 0 and the LED is
+  *      low. 2. After deassertion the counter advances and the LED eventually
+  *      toggles.
   *
-  * The toplevel exposes `io.clk` as an ordinary input rather than the
-  * implicit clock domain, so the testbench has to drive the clock by hand.
+  * The toplevel exposes `io.clk` as an ordinary input rather than the implicit
+  * clock domain, so the testbench has to drive the clock by hand.
   */
 object BlinkyWithResetSim {
   def main(args: Array[String]): Unit = {
@@ -30,7 +31,10 @@ object BlinkyWithResetSim {
         // 1) Hold in reset for a while; LED must remain low.
         for (_ <- 0 until 16) {
           tick()
-          assert(!dut.io.led.toBoolean, "led should stay low while reset is asserted")
+          assert(
+            !dut.io.led.toBoolean,
+            "led should stay low while reset is asserted"
+          )
         }
 
         // 2) Deassert reset and look for at least two MSB transitions.
@@ -43,8 +47,13 @@ object BlinkyWithResetSim {
           if (cur != prev) transitions += 1
           prev = cur
         }
-        assert(transitions >= 2, s"led should toggle after reset release, saw $transitions")
-        println(s"OK: BlinkyWithReset stayed quiet during reset and toggled $transitions times after release")
+        assert(
+          transitions >= 2,
+          s"led should toggle after reset release, saw $transitions"
+        )
+        println(
+          s"OK: BlinkyWithReset stayed quiet during reset and toggled $transitions times after release"
+        )
       }
   }
 }

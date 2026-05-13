@@ -9,23 +9,21 @@ import spinal.lib.bus.amba3.apb.sim.Apb3Driver
   * Drives the controller through its memory-mapped interface with a
   * software-style sequence:
   *
-  *   1. Read CFG_INFO and the FIFO_STATUS depth fields — sanity-check
-  *      the introspection registers reflect the build parameters.
-  *   2. Enable the controller and TX/RX paths via CTRL.
-  *   3. Write a handful of bytes to TXDATA, with the TX line looped
-  *      back to RX in the testbench.
-  *   4. Poll RX_FIFO_STATUS.empty and pop bytes from RXDATA, checking
-  *      they round-trip unchanged.
-  *   5. Verify ISR.rx_done sticks until firmware writes 1 to clear it
-  *      (W1C semantics).
+  *   1. Read CFG_INFO and the FIFO_STATUS depth fields — sanity-check the
+  *      introspection registers reflect the build parameters. 2. Enable the
+  *      controller and TX/RX paths via CTRL. 3. Write a handful of bytes to
+  *      TXDATA, with the TX line looped back to RX in the testbench. 4. Poll
+  *      RX_FIFO_STATUS.empty and pop bytes from RXDATA, checking they
+  *      round-trip unchanged. 5. Verify ISR.rx_done sticks until firmware
+  *      writes 1 to clear it (W1C semantics).
   *
-  * Pure black-box: the sim never reaches inside the controller. If
-  * the address decode for TXDATA / RXDATA is wrong or the FIFO push
-  * timing is off, a byte goes missing here and the sim fails.
+  * Pure black-box: the sim never reaches inside the controller. If the address
+  * decode for TXDATA / RXDATA is wrong or the FIFO push timing is off, a byte
+  * goes missing here and the sim fails.
   *
-  * The whole exercise runs on the default 12 MHz / 115200 8N1
-  * configuration — small enough to simulate end-to-end in a few
-  * hundred microseconds of wall-clock SCL time.
+  * The whole exercise runs on the default 12 MHz / 115200 8N1 configuration —
+  * small enough to simulate end-to-end in a few hundred microseconds of
+  * wall-clock SCL time.
   */
 object UartControllerSim {
 
@@ -84,7 +82,9 @@ object UartControllerSim {
         revMajorRb == Revision.major && revMinorRb == Revision.minor && revPatchRb == Revision.patch,
         s"REVISION readback ${revMajorRb}.${revMinorRb}.${revPatchRb} != ${Revision.asString} (expected from Revision object / Makefile)"
       )
-      println(s"[ok] REVISION = ${revMajorRb}.${revMinorRb}.${revPatchRb} (raw 0x${revisionWord.toString(16)})")
+      println(
+        s"[ok] REVISION = ${revMajorRb}.${revMinorRb}.${revPatchRb} (raw 0x${revisionWord.toString(16)})"
+      )
 
       // ----- introspection registers -----
       val cfgInfo = apb.read(CFG_INFO)
@@ -117,10 +117,13 @@ object UartControllerSim {
         ((rxStatusReset >> FIFO_EMPTY) & 1) == 1 && ((rxStatusReset >> FIFO_COUNT_LSB) & 0xff) == 0,
         s"RX FIFO not empty at reset: 0x${rxStatusReset.toString(16)}"
       )
-      println(s"[ok] FIFO_STATUS depth fields = TX:$txDepthRb RX:$rxDepthRb, both empty at reset")
+      println(
+        s"[ok] FIFO_STATUS depth fields = TX:$txDepthRb RX:$rxDepthRb, both empty at reset"
+      )
 
       val baudReset = apb.read(BAUD)
-      val expectedPhaseInc = BigInt(BaudGenerator.phaseIncFor(cfg, BaudGenerator.defaultAccWidth))
+      val expectedPhaseInc =
+        BigInt(BaudGenerator.phaseIncFor(cfg, BaudGenerator.defaultAccWidth))
       assert(
         baudReset == expectedPhaseInc,
         s"BAUD reset $baudReset != phaseIncFor(cfg) $expectedPhaseInc"
@@ -209,7 +212,9 @@ object UartControllerSim {
         (isrCleared & (1 << IRQ_RX_DONE)) == 0,
         s"ISR.rx_done should be cleared by W1C write, got 0x${isrCleared.toString(16)}"
       )
-      println("[ok] ISR.rx_done sticky / read-preserves / W1C-clears semantics verified")
+      println(
+        "[ok] ISR.rx_done sticky / read-preserves / W1C-clears semantics verified"
+      )
 
       println("UartControllerSim: PASS")
     }

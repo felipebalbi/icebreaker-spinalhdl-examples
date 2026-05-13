@@ -9,26 +9,24 @@ import spinal.lib._
   * cycles; the output is high while `counter < duty` and low otherwise. Average
   * duty cycle is therefore `duty / 2^width` exactly.
   *
-  * On the iCEbreaker (12 MHz, `width = 12`) the carrier is
-  * `12_000_000 / 4096 ≈ 2.93 kHz` — well above the eye's flicker-fusion
-  * threshold, so a connected LED looks like a smooth analog brightness whose
-  * intensity tracks `io.duty / 4095`.
+  * On the iCEbreaker (12 MHz, `width = 12`) the carrier is `12_000_000 / 4096 ≈
+  * 2.93 kHz` — well above the eye's flicker-fusion threshold, so a connected
+  * LED looks like a smooth analog brightness whose intensity tracks `io.duty /
+  * 4095`.
   *
   * Why no `ClockDomain` is created here:
-  *   - Pwm is a leaf component. It uses SpinalHDL's implicit default
-  *     clock domain so the synthesised module exposes a single
-  *     top-level `clk` port. The icebreaker pcf binds that port to the
-  *     12 MHz oscillator on pin 35.
-  *   - There is no reset wire: with the default `BOOT` reset kind the
-  *     iCE40 cold-starts the counter to its `init(0)` value.
+  *   - Pwm is a leaf component. It uses SpinalHDL's implicit default clock
+  *     domain so the synthesised module exposes a single top-level `clk` port.
+  *     The icebreaker pcf binds that port to the 12 MHz oscillator on pin 35.
+  *   - There is no reset wire: with the default `BOOT` reset kind the iCE40
+  *     cold-starts the counter to its `init(0)` value.
   *
   * Why `io.duty` is an *external* input, not internal state:
-  *   - In this demo the duty value comes from the PMOD header pins
-  *     (see `icebreaker.pcf`) so the brightness can be set with DIP
-  *     switches or another peripheral.
-  *   - For a self-contained breathing-LED demo see `PwmFade/`, which
-  *     drives this same idea from an internal phase generator and
-  *     waveform shaper.
+  *   - In this demo the duty value comes from the PMOD header pins (see
+  *     `icebreaker.pcf`) so the brightness can be set with DIP switches or
+  *     another peripheral.
+  *   - For a self-contained breathing-LED demo see `PwmFade/`, which drives
+  *     this same idea from an internal phase generator and waveform shaper.
   *
   * @param width
   *   Width of the duty/counter in bits. PWM resolution is `2^width` steps; the

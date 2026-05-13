@@ -2,34 +2,32 @@ package i2c
 
 /** Standalone sim for [[BusTiming]].
   *
-  * `BusTiming` is a pure-Scala compile-time table — there is no clock
-  * to drive, no DUT to wrap, and (deliberately) no `SimConfig.compile`.
-  * This `main` is structured the same way `BaudGeneratorSim` is, just
-  * without the SpinalSim harness around it.
+  * `BusTiming` is a pure-Scala compile-time table — there is no clock to drive,
+  * no DUT to wrap, and (deliberately) no `SimConfig.compile`. This `main` is
+  * structured the same way `BaudGeneratorSim` is, just without the SpinalSim
+  * harness around it.
   *
   * What we check, for every `(BusSpeed × {12, 25, 48} MHz)` combo:
   *
-  *   1. Every published cycle count meets or exceeds the spec floor in
-  *      real time. Concretely: `cycles × 1e9 / clkFreqHz ≥ specMinNs`.
-  *      Using floating-point on the *output* side keeps the test honest
-  *      — if `BusTiming`'s own integer math is wrong (the prior
-  *      `Int * Int` overflow bug was a real one), the test catches it.
-  *   2. Every cycle count is ≥ 0 (`tHdDat = 0` is legal; nothing else
-  *      should ever be negative or zero).
-  *   3. `tHigh ≥ tHighMin` and `tLow ≥ tLowMin` (the `max(...)` floor).
-  *   4. `tHigh + tLow ≥ 4 × quarterPeriodCycles` — one-way invariant
-  *      between the scheduled bit period and the natural
-  *      quarter-period grid. Equality is informational, not required.
-  *   5. Cross-check vs `I2cConfig.busFreqHz`: the *achieved* SCL
-  *      frequency is `clkFreqHz / (tHigh + tLow)`. It should equal
-  *      `busFreqHz` whenever neither phase needed stretching, and be
-  *      strictly less than `busFreqHz` otherwise (Fast mode at every
-  *      tested clock falls into the second bucket — see the
-  *      class-level note in `BusTiming`).
+  *   1. Every published cycle count meets or exceeds the spec floor in real
+  *      time. Concretely: `cycles × 1e9 / clkFreqHz ≥ specMinNs`. Using
+  *      floating-point on the *output* side keeps the test honest — if
+  *      `BusTiming`'s own integer math is wrong (the prior `Int * Int` overflow
+  *      bug was a real one), the test catches it. 2. Every cycle count is ≥ 0
+  *      (`tHdDat = 0` is legal; nothing else should ever be negative or zero).
+  *      3. `tHigh ≥ tHighMin` and `tLow ≥ tLowMin` (the `max(...)` floor). 4.
+  *         `tHigh + tLow ≥ 4 × quarterPeriodCycles` — one-way invariant between
+  *         the scheduled bit period and the natural quarter-period grid.
+  *         Equality is informational, not required. 5. Cross-check vs
+  *         `I2cConfig.busFreqHz`: the *achieved* SCL frequency is `clkFreqHz /
+  *         (tHigh + tLow)`. It should equal `busFreqHz` whenever neither phase
+  *         needed stretching, and be strictly less than `busFreqHz` otherwise
+  *         (Fast mode at every tested clock falls into the second bucket — see
+  *         the class-level note in `BusTiming`).
   *
-  * The sim also prints a formatted table per combo so that a human
-  * reviewer can eyeball the numbers against the I²C spec table without
-  * stepping through the asserts.
+  * The sim also prints a formatted table per combo so that a human reviewer can
+  * eyeball the numbers against the I²C spec table without stepping through the
+  * asserts.
   *
   * Run: `sbt "runMain i2c.BusTimingSim"`
   */
@@ -159,11 +157,11 @@ object BusTimingSim {
 
   /** Confirm the prior 32-bit overflow bug stays fixed.
     *
-    * At 12 MHz × 4700 ns the *unwidened* `Int * Int` product wraps to
-    * roughly -2.04e9, and `divRoundUp` against `1_000_000_000` would
-    * publish a negative cycle count. The fix in `toClockCycles`
-    * widens to `Long` before multiplying, which we re-derive here
-    * from the final published `tBuf` (whose ns value is 4700).
+    * At 12 MHz × 4700 ns the *unwidened* `Int * Int` product wraps to roughly
+    * -2.04e9, and `divRoundUp` against `1_000_000_000` would publish a negative
+    * cycle count. The fix in `toClockCycles` widens to `Long` before
+    * multiplying, which we re-derive here from the final published `tBuf`
+    * (whose ns value is 4700).
     */
   private def regressionOverflowFix(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
@@ -180,10 +178,10 @@ object BusTimingSim {
     println(s"OK: 32-bit overflow regression check passes (tBuf=${t.tBuf})")
   }
 
-  /** Confirm `I2cConfig`'s `quarterPeriodCycles >= 1` guard fires
-    * for combos `BusTiming` couldn't possibly serve. Catches the
-    * "user gave us a 100 kHz clock for a Standard bus" mistake at
-    * elaboration rather than producing a never-toggling SCL.
+  /** Confirm `I2cConfig`'s `quarterPeriodCycles >= 1` guard fires for combos
+    * `BusTiming` couldn't possibly serve. Catches the "user gave us a 100 kHz
+    * clock for a Standard bus" mistake at elaboration rather than producing a
+    * never-toggling SCL.
     */
   private def regressionConfigGuards(): Unit = {
     var threw = false

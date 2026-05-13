@@ -137,33 +137,26 @@ import spinal.lib.fsm._
 
 /** Opcode for a [[ByteCmd]].
   *
-  * The kind is the controller's primary discriminator. It both selects
-  * the FSM path and (combined with current `isRead`/`mustTerminate`
-  * regime) decides whether the command is legal at all.
+  * The kind is the controller's primary discriminator. It both selects the FSM
+  * path and (combined with current `isRead`/`mustTerminate` regime) decides
+  * whether the command is legal at all.
   *
-  *   - `AddrWrite` : Start condition + 7-bit address with `R/W=0`.
-  *                   `data` = address byte (lsb is forced to 0; see
-  *                   [[ByteCmd]]). `ackOut` is ignored. Legal only
-  *                   from idle.
-  *   - `AddrRead`  : Start condition + 7-bit address with `R/W=1`.
-  *                   Same shape as AddrWrite but lsb is forced to 1.
-  *                   Legal only from idle.
-  *   - `WriteData` : Shift `data` MSB-first onto SDA, sample target
-  *                   ACK on the 9th clock. Legal only after a write
-  *                   address has landed (isRead=False) and the
-  *                   transaction is not wedged.
-  *   - `ReadData`  : Receive 8 bits into `data`, then drive ACK
-  *                   (continue) or NAK (end of read) per `ackOut`
-  *                   on the 9th clock. Legal only after a read
-  *                   address has landed (isRead=True) and the
-  *                   transaction is not wedged.
-  *   - `RepStart`  : Repeated start. `data`'s lsb sets the new
-  *                   direction. Legal in either regime — it is the
-  *                   only way (besides `Stop`) to recover from a
-  *                   wedged transaction without releasing the bus.
-  *   - `Stop`      : Terminate the transaction and release the bus.
-  *                   Legal in either regime. Always returns the
-  *                   controller to the idle hub.
+  *   - `AddrWrite` : Start condition + 7-bit address with `R/W=0`. `data` =
+  *     address byte (lsb is forced to 0; see [[ByteCmd]]). `ackOut` is ignored.
+  *     Legal only from idle.
+  *   - `AddrRead` : Start condition + 7-bit address with `R/W=1`. Same shape as
+  *     AddrWrite but lsb is forced to 1. Legal only from idle.
+  *   - `WriteData` : Shift `data` MSB-first onto SDA, sample target ACK on the
+  *     9th clock. Legal only after a write address has landed (isRead=False)
+  *     and the transaction is not wedged.
+  *   - `ReadData` : Receive 8 bits into `data`, then drive ACK (continue) or
+  *     NAK (end of read) per `ackOut` on the 9th clock. Legal only after a read
+  *     address has landed (isRead=True) and the transaction is not wedged.
+  *   - `RepStart` : Repeated start. `data`'s lsb sets the new direction. Legal
+  *     in either regime — it is the only way (besides `Stop`) to recover from a
+  *     wedged transaction without releasing the bus.
+  *   - `Stop` : Terminate the transaction and release the bus. Legal in either
+  *     regime. Always returns the controller to the idle hub.
   */
 object ByteCmdKind extends SpinalEnum {
   val AddrWrite, AddrRead, WriteData, ReadData, RepStart, Stop = newElement()
@@ -171,30 +164,27 @@ object ByteCmdKind extends SpinalEnum {
 
 /** Single command from the SW driver into the byte controller.
   *
-  * The bundle is consumed as a stream payload, so all fields are
-  * valid only the cycle `io.cmd.fire`. Anything the FSM needs later
-  * (the address/payload byte, the read-end NAK choice) is latched
-  * into a Reg that same cycle.
+  * The bundle is consumed as a stream payload, so all fields are valid only the
+  * cycle `io.cmd.fire`. Anything the FSM needs later (the address/payload byte,
+  * the read-end NAK choice) is latched into a Reg that same cycle.
   *
-  * @param kind   See [[ByteCmdKind]].
-  * @param data   Multi-purpose payload:
-  *               - On `AddrWrite` / `AddrRead` : 7-bit address in
-  *                 bits[7:1]; bit[0] is overwritten by the controller
-  *                 to match `kind` (so a SW driver passing junk in
-  *                 the lsb cannot desync the wire from `isRead`).
-  *               - On `RepStart` : 7-bit address in bits[7:1] and
-  *                 the *real* R/W bit in bit[0] — RepStart is the
-  *                 one place the lsb is honoured directly, because
-  *                 there's no separate AddrWrite/AddrRead kind to
-  *                 disambiguate direction.
-  *               - On `WriteData` : the byte to clock onto SDA.
-  *               - On `ReadData` / `Stop` : ignored (don't-care).
-  * @param ackOut Read-end signal, only meaningful on `ReadData`:
-  *               `False` = ACK (target should send another byte),
-  *               `True`  = NAK (we're done; target releases SDA).
-  *               Driving NAK on a read transitions the controller
-  *               into the wedged regime, forcing the SW driver to
-  *               follow with `Stop` or `RepStart`.
+  * @param kind
+  *   See [[ByteCmdKind]].
+  * @param data
+  *   Multi-purpose payload:
+  *   - On `AddrWrite` / `AddrRead` : 7-bit address in bits[7:1]; bit[0] is
+  *     overwritten by the controller to match `kind` (so a SW driver passing
+  *     junk in the lsb cannot desync the wire from `isRead`).
+  *   - On `RepStart` : 7-bit address in bits[7:1] and the *real* R/W bit in
+  *     bit[0] — RepStart is the one place the lsb is honoured directly, because
+  *     there's no separate AddrWrite/AddrRead kind to disambiguate direction.
+  *   - On `WriteData` : the byte to clock onto SDA.
+  *   - On `ReadData` / `Stop` : ignored (don't-care).
+  * @param ackOut
+  *   Read-end signal, only meaningful on `ReadData`: `False` = ACK (target
+  *   should send another byte), `True` = NAK (we're done; target releases SDA).
+  *   Driving NAK on a read transitions the controller into the wedged regime,
+  *   forcing the SW driver to follow with `Stop` or `RepStart`.
   */
 case class ByteCmd() extends Bundle {
   val kind = ByteCmdKind()
@@ -204,25 +194,19 @@ case class ByteCmd() extends Bundle {
 
 /** Outcome of a single [[ByteCmd]].
   *
-  *   - `Ok`         : Bus operation completed without controller-side
-  *                    incident. The SW driver still needs to inspect
-  *                    `ackIn` on writes to know whether the target
-  *                    accepted the byte.
-  *   - `ArbLost`    : The bit controller detected another master
-  *                    winning a bit we tried to drive. The byte was
-  *                    abandoned. The transaction is forced into the
-  *                    wedged regime — only `Stop` or `RepStart` will
-  *                    be accepted next.
-  *   - `InvalidSeq` : The SW driver issued a command that is not legal
-  *                    in the current regime (e.g. `WriteData` from
-  *                    idle, `AddrWrite` while a transaction is
-  *                    already in flight, or anything other than
-  *                    `Stop`/`RepStart` while wedged). The bus was
-  *                    NOT touched. The controller's regime did not
-  *                    change. The driver is expected to inspect
-  *                    `status`, identify the bug, and recover (which
-  *                    typically means issuing `Stop` if a transaction
-  *                    is still in flight).
+  *   - `Ok` : Bus operation completed without controller-side incident. The SW
+  *     driver still needs to inspect `ackIn` on writes to know whether the
+  *     target accepted the byte.
+  *   - `ArbLost` : The bit controller detected another master winning a bit we
+  *     tried to drive. The byte was abandoned. The transaction is forced into
+  *     the wedged regime — only `Stop` or `RepStart` will be accepted next.
+  *   - `InvalidSeq` : The SW driver issued a command that is not legal in the
+  *     current regime (e.g. `WriteData` from idle, `AddrWrite` while a
+  *     transaction is already in flight, or anything other than
+  *     `Stop`/`RepStart` while wedged). The bus was NOT touched. The
+  *     controller's regime did not change. The driver is expected to inspect
+  *     `status`, identify the bug, and recover (which typically means issuing
+  *     `Stop` if a transaction is still in flight).
   */
 object ByteRspStatus extends SpinalEnum {
   val Ok, ArbLost, InvalidSeq = newElement()
@@ -230,27 +214,24 @@ object ByteRspStatus extends SpinalEnum {
 
 /** Single response from the byte controller back to the SW driver.
   *
-  * Field meaningfulness is gated on `status` and on the originating
-  * command kind:
+  * Field meaningfulness is gated on `status` and on the originating command
+  * kind:
   *
-  *   status        kind originating it          data         ackIn
-  *   Ok            AddrWrite/AddrRead/RepStart  0            target ACK/NAK
-  *   Ok            WriteData                    0            target ACK/NAK
-  *   Ok            ReadData                     received     False (we drove ACK)
-  *   Ok            Stop                         0            False
-  *   ArbLost       any bus op                   0 or partial don't-care
-  *   InvalidSeq    any (refused)                0            True (NAK-ish)
+  * status kind originating it data ackIn Ok AddrWrite/AddrRead/RepStart 0
+  * target ACK/NAK Ok WriteData 0 target ACK/NAK Ok ReadData received False (we
+  * drove ACK) Ok Stop 0 False ArbLost any bus op 0 or partial don't-care
+  * InvalidSeq any (refused) 0 True (NAK-ish)
   *
-  * @param data   Bytes clocked in from the bus on a `ReadData` rsp;
-  *               `0` for everything else.
-  * @param ackIn  Target's ACK on the 9th SCL clock: `False` = ACK
-  *               (target accepted), `True` = NAK (target refused).
-  *               Only meaningful when `status == Ok` and the
-  *               originating kind was a write-direction op (Addr*,
-  *               WriteData, RepStart). NAK forces the wedged regime
-  *               for the next command.
-  * @param status See [[ByteRspStatus]]. The canonical signal —
-  *               always trustworthy.
+  * @param data
+  *   Bytes clocked in from the bus on a `ReadData` rsp; `0` for everything
+  *   else.
+  * @param ackIn
+  *   Target's ACK on the 9th SCL clock: `False` = ACK (target accepted), `True`
+  *   \= NAK (target refused). Only meaningful when `status == Ok` and the
+  *   originating kind was a write-direction op (Addr*, WriteData, RepStart).
+  *   NAK forces the wedged regime for the next command.
+  * @param status
+  *   See [[ByteRspStatus]]. The canonical signal — always trustworthy.
   */
 case class ByteRsp() extends Bundle {
   val data = Bits(8 bits)
@@ -258,14 +239,13 @@ case class ByteRsp() extends Bundle {
   val status = ByteRspStatus()
 }
 
-/** Byte-level I²C master FSM. See top-of-file comment for design
-  * rationale, command stream semantics, and the hub-and-spoke
-  * topology overview.
+/** Byte-level I²C master FSM. See top-of-file comment for design rationale,
+  * command stream semantics, and the hub-and-spoke topology overview.
   *
   * @param cfg
-  *   Compile-time configuration shared with [[I2cBitController]]
-  *   (clock frequency, bus speed, clock-stretching flag, etc.).
-  *   Only forwarded — no fields are read directly by the byte FSM.
+  *   Compile-time configuration shared with [[I2cBitController]] (clock
+  *   frequency, bus speed, clock-stretching flag, etc.). Only forwarded — no
+  *   fields are read directly by the byte FSM.
   */
 case class I2cByteController(cfg: I2cConfig) extends Component {
 
@@ -310,73 +290,65 @@ case class I2cByteController(cfg: I2cConfig) extends Component {
   // Per-transaction state
   // -------------------------------------------------------------------------
 
-  /** Direction of the current transaction, latched at AddrWrite/
-    * AddrRead time and re-latched on RepStart. Drives which data
-    * commands `waitNextCmdState` accepts (WriteData when False,
-    * ReadData when True). Cleared only implicitly by the next
-    * AddrWrite/AddrRead (we never reset it on Stop because state
-    * identity already prevents stale reads from idle).
+  /** Direction of the current transaction, latched at AddrWrite/ AddrRead time
+    * and re-latched on RepStart. Drives which data commands `waitNextCmdState`
+    * accepts (WriteData when False, ReadData when True). Cleared only
+    * implicitly by the next AddrWrite/AddrRead (we never reset it on Stop
+    * because state identity already prevents stale reads from idle).
     */
   val isRead = Reg(Bool()) init (False)
 
   /** Wedged-regime flag. Set by:
     *   - any rsp that observed a target NAK (write direction),
     *   - any rsp that observed arb-loss,
-    *   - the read rsp when the SW driver drove a NAK end-of-read
-    *     (`ackOutReg` was True).
-    * Cleared by:
+    *   - the read rsp when the SW driver drove a NAK end-of-read (`ackOutReg`
+    *     was True). Cleared by:
     *   - `stopRspState.onExit` (transaction over),
-    *   - the RepStart arm of `waitNextCmdState` (RepStart re-aims
-    *     and is itself a recovery action).
-    * Read by `waitNextCmdState` to gate the legal command set down
-    * to `Stop` / `RepStart` only.
+    *   - the RepStart arm of `waitNextCmdState` (RepStart re-aims and is itself
+    *     a recovery action). Read by `waitNextCmdState` to gate the legal
+    *     command set down to `Stop` / `RepStart` only.
     */
   val mustTerminate = Reg(Bool()) init (False)
 
-  /** Sticky arb-loss snapshot for the current bus operation. Set in
-    * any `*Wait*` state that observes `bitCtrl.io.arbLost`, and
-    * (per the short-circuit pattern below) immediately diverts the
-    * FSM to the corresponding RspState. Surfaced in
-    * `rsp.status == ArbLost`. Cleared at the start of each new
-    * transaction (idle's AddrWrite/AddrRead arms, RepStart, and
-    * Stop's onExit).
+  /** Sticky arb-loss snapshot for the current bus operation. Set in any
+    * `*Wait*` state that observes `bitCtrl.io.arbLost`, and (per the
+    * short-circuit pattern below) immediately diverts the FSM to the
+    * corresponding RspState. Surfaced in `rsp.status == ArbLost`. Cleared at
+    * the start of each new transaction (idle's AddrWrite/AddrRead arms,
+    * RepStart, and Stop's onExit).
     */
   val arbLostReg = Reg(Bool()) init (False)
 
-  /** Multi-purpose 8-bit shift register. Three roles, never
-    * concurrent:
-    *   1. Outbound address byte during S/Sr → write pipeline.
-    *   2. Outbound data byte during WriteData → write pipeline.
-    *   3. Inbound shift register during ReadData (filled LSB-last).
+  /** Multi-purpose 8-bit shift register. Three roles, never concurrent:
+    *   1. Outbound address byte during S/Sr → write pipeline. 2. Outbound data
+    *      byte during WriteData → write pipeline. 3. Inbound shift register
+    *      during ReadData (filled LSB-last).
     *
-    * Latched on `io.cmd.fire` for outbound use (idle, RepStart arm,
-    * WriteData arm). Cleared to 0 on idle's data ops, but the more
-    * important reset is "loaded fresh at every cmd.fire that needs
-    * it" — we never carry stale outbound bytes across transactions.
+    * Latched on `io.cmd.fire` for outbound use (idle, RepStart arm, WriteData
+    * arm). Cleared to 0 on idle's data ops, but the more important reset is
+    * "loaded fresh at every cmd.fire that needs it" — we never carry stale
+    * outbound bytes across transactions.
     */
   val dataByte = Reg(Bits(8 bits)) init (0)
 
-  /** Bit position counter for the 8-bit shift loops. 0..7 inclusive
-    * (4 bits wide for headroom against off-by-one). Re-zeroed at the
-    * start of each shift loop and again before entering the ACK
-    * phase, so neither the shift nor the ACK depends on prior
-    * residual values.
+  /** Bit position counter for the 8-bit shift loops. 0..7 inclusive (4 bits
+    * wide for headroom against off-by-one). Re-zeroed at the start of each
+    * shift loop and again before entering the ACK phase, so neither the shift
+    * nor the ACK depends on prior residual values.
     */
   val bitCounter = Reg(UInt(4 bits)) init (0)
 
-  /** Latched target ACK from the 9th SCL pulse on a write op
-    * (WriteBit ACK phase samples SDA via `BitCmd.ReadBit`). 0 = ACK,
-    * 1 = NAK. Surfaced in the next rsp's `ackIn`. Written by
-    * `writeAckWaitState`. Read by `writeRspState`. Carries no
-    * meaning on read transactions.
+  /** Latched target ACK from the 9th SCL pulse on a write op (WriteBit ACK
+    * phase samples SDA via `BitCmd.ReadBit`). 0 = ACK, 1 = NAK. Surfaced in the
+    * next rsp's `ackIn`. Written by `writeAckWaitState`. Read by
+    * `writeRspState`. Carries no meaning on read transactions.
     */
   val ackInReg = Reg(Bool()) init (False)
 
-  /** Latched read-end NAK choice from the SW driver, captured at the
-    * cycle `io.cmd.fire` for a `ReadData` op. Drives `txBit` during
-    * the read ACK phase (`readAckIssueState`). Read again by
-    * `readRspState` to decide whether to set `mustTerminate` (NAK
-    * means "this was the last byte").
+  /** Latched read-end NAK choice from the SW driver, captured at the cycle
+    * `io.cmd.fire` for a `ReadData` op. Drives `txBit` during the read ACK
+    * phase (`readAckIssueState`). Read again by `readRspState` to decide
+    * whether to set `mustTerminate` (NAK means "this was the last byte").
     */
   val ackOutReg = Reg(Bool()) init (False)
 

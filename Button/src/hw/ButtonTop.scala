@@ -12,16 +12,16 @@ import spinal.lib._
   *   - **Async input synchronisation.** The button is wired straight to a
   *     physical pin and is asynchronous to our 12 MHz clock. Sampling it
   *     directly into clocked logic risks metastability — a flip-flop captured
-  *     mid-transition can settle to either value and, worse, propagate a
-  *     glitch to fan-out that disagrees about which value it saw. `BufferCC`
-  *     inserts a chain of registers to make the metastable window vanishingly
-  *     improbable before any consumer sees the signal.
-  *   - **Boundary inversion for active-low inputs.** The iCEbreaker user
-  *     button is electrically active-LOW (pulled high by a PCB pull-up,
-  *     shorts to ground when pressed). We invert it once at the boundary
-  *     (`val pressed = !io.btn`) so the rest of the logic — synchroniser,
-  *     edge detector, toggle — works in natural "1 = pressed" terms and
-  *     `init = False` reads as "not pressed at boot".
+  *     mid-transition can settle to either value and, worse, propagate a glitch
+  *     to fan-out that disagrees about which value it saw. `BufferCC` inserts a
+  *     chain of registers to make the metastable window vanishingly improbable
+  *     before any consumer sees the signal.
+  *   - **Boundary inversion for active-low inputs.** The iCEbreaker user button
+  *     is electrically active-LOW (pulled high by a PCB pull-up, shorts to
+  *     ground when pressed). We invert it once at the boundary (`val pressed =
+  *     !io.btn`) so the rest of the logic — synchroniser, edge detector, toggle
+  *     — works in natural "1 = pressed" terms and `init = False` reads as "not
+  *     pressed at boot".
   *   - **Edge detection.** Using a level-sensitive button would toggle the LED
   *     once per *cycle* the button was held, i.e. millions of times per press.
   *     We register the synchronised value and assert "rising edge" only when
@@ -43,15 +43,15 @@ case class ButtonTop() extends Component {
     val clk = in Bool ()
 
     /** Raw button input (pcf maps to pin 10). Asynchronous, bouncy, and
-      * **electrically active-LOW**: the iCEbreaker user button is pulled
-      * high through a PCB pull-up and shorts to ground when pressed. We
-      * invert it once at the boundary (`val pressed = !io.btn`) so the
-      * rest of the design works in *logical* "pressed = 1" terms.
+      * **electrically active-LOW**: the iCEbreaker user button is pulled high
+      * through a PCB pull-up and shorts to ground when pressed. We invert it
+      * once at the boundary (`val pressed = !io.btn`) so the rest of the design
+      * works in *logical* "pressed = 1" terms.
       */
     val btn = in Bool ()
 
-    /** LED output (pcf maps to pin 11). Toggles on each detected rising
-      * edge of the synchronised button signal.
+    /** LED output (pcf maps to pin 11). Toggles on each detected rising edge of
+      * the synchronised button signal.
       */
     val led = out Bool ()
   }

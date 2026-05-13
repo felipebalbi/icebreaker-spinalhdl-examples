@@ -11,8 +11,8 @@ import spinal.core._
   *   - `Modulator` is an abstract `Component` carrying `ModulatorIO`.
   *   - `ModulatorImpl` is the concrete composite that instantiates children and
   *     wires them.
-  *   - `Modulator.apply(cfg)` is the factory; callers use it instead of
-  *     `new ModulatorImpl(cfg)` so future variants (e.g. CORDIC, LFSR-driven
+  *   - `Modulator.apply(cfg)` is the factory; callers use it instead of `new
+  *     ModulatorImpl(cfg)` so future variants (e.g. CORDIC, LFSR-driven
   *     dithering, ...) can be added without touching callers.
   *
   * `setDefinitionName(...)` renames the generated Verilog module to include the

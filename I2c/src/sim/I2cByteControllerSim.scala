@@ -6,50 +6,38 @@ import spinal.lib._
 
 /** Simulation for [[I2cByteController]].
   *
-  * The byte controller sits one rung above [[I2cBitController]]:
-  * each `ByteCmd` it accepts maps to 8 bit-level transactions
-  * plus an ACK slot. So this sim doesn't re-prove what the bit
-  * sim already proved (SCL pulse counts, Start/Stop dwell, arb
-  * detection at the bit level). Instead it focuses on the
+  * The byte controller sits one rung above [[I2cBitController]]: each `ByteCmd`
+  * it accepts maps to 8 bit-level transactions plus an ACK slot. So this sim
+  * doesn't re-prove what the bit sim already proved (SCL pulse counts,
+  * Start/Stop dwell, arb detection at the bit level). Instead it focuses on the
   * byte-level invariants the controller is responsible for:
   *
   *   - One `cmd.fire` produces exactly one `rsp.fire`.
-  *   - Address-byte direction-bit masking matches `kind`
-  *     (AddrWrite forces lsb = 0, AddrRead forces lsb = 1,
-  *     RepStart honours the user's lsb).
-  *   - Multi-byte transactions stay "addressed" between bytes
-  *     without re-issuing Start.
-  *   - NAK from the target latches `mustTerminate`, and any
-  *     non-terminator command issued while wedged returns
-  *     `InvalidSeq`.
-  *   - Arbitration loss short-circuits each `*WaitState` straight
-  *     to the matching `*RspState` with `status = ArbLost`.
-  *   - Stop is idempotent w.r.t. arb-loss (it always completes,
-  *     because we owe the bus a release).
-  *   - InvalidSeq is reported (and the FSM returns to idle) for
-  *     every illegal command — from idle, while wedged, and on
-  *     direction mismatch within a transaction.
+  *   - Address-byte direction-bit masking matches `kind` (AddrWrite forces lsb
+  *     \= 0, AddrRead forces lsb = 1, RepStart honours the user's lsb).
+  *   - Multi-byte transactions stay "addressed" between bytes without
+  *     re-issuing Start.
+  *   - NAK from the target latches `mustTerminate`, and any non-terminator
+  *     command issued while wedged returns `InvalidSeq`.
+  *   - Arbitration loss short-circuits each `*WaitState` straight to the
+  *     matching `*RspState` with `status = ArbLost`.
+  *   - Stop is idempotent w.r.t. arb-loss (it always completes, because we owe
+  *     the bus a release).
+  *   - InvalidSeq is reported (and the FSM returns to idle) for every illegal
+  *     command — from idle, while wedged, and on direction mismatch within a
+  *     transaction.
   *
-  * Rig
-  * ---
-  * The DUT's [[I2cIo]] hangs off one slave port of an
-  * [[I2cIoBus]]. The other slave port is wired to a
-  * [[BehaviouralI2cTarget]] master. That puts a real wired-AND
-  * between the two participants without sim hand-waving, and lets
-  * arbitration tests fork an extra driver onto the same bus.
+  * Rig --- The DUT's [[I2cIo]] hangs off one slave port of an [[I2cIoBus]]. The
+  * other slave port is wired to a [[BehaviouralI2cTarget]] master. That puts a
+  * real wired-AND between the two participants without sim hand-waving, and
+  * lets arbitration tests fork an extra driver onto the same bus.
   *
-  *   ┌─────────────────────┐         ┌─────────────────────┐
-  *   │ I2cByteController   │◀── a ──▶│                     │
-  *   │ (DUT)               │         │     I2cIoBus        │
-  *   └─────────────────────┘         │  (wired-AND slave)  │
-  *                                   │                     │
-  *   ┌─────────────────────┐         │                     │
-  *   │ BehaviouralI2cTarget│◀── b ──▶│                     │
-  *   └─────────────────────┘         └─────────────────────┘
+  * ┌─────────────────────┐ ┌─────────────────────┐ │ I2cByteController │◀── a
+  * ──▶│ │ │ (DUT) │ │ I2cIoBus │ └─────────────────────┘ │ (wired-AND slave) │
+  * │ │ ┌─────────────────────┐ │ │ │ BehaviouralI2cTarget│◀── b ──▶│ │
+  * └─────────────────────┘ └─────────────────────┘
   *
-  * Cases
-  * -----
-  * Twelve cases, each a stub at scaffold time. See per-method
+  * Cases ----- Twelve cases, each a stub at scaffold time. See per-method
   * Scaladoc below for what each one will eventually verify.
   *
   * Run: `sbt "runMain i2c.I2cByteControllerSim"`
@@ -97,15 +85,14 @@ object I2cByteControllerSim {
 
   // ----- Helpers --------------------------------------------------------
 
-  /** Drive one [[ByteCmd]] into the DUT and wait for the producer
-    * handshake to fire.
+  /** Drive one [[ByteCmd]] into the DUT and wait for the producer handshake to
+    * fire.
     *
-    * Uses `waitSamplingWhere(cmd.ready)` rather than polling because
-    * the controller's `cmd.ready` only rises in the idle/started/
-    * wedged hubs — between Issue/Wait pairs at the bit-ctrl level
-    * it stays low for many cycles. Drop `valid` on the same cycle
-    * we observe `ready` (== `fire`) so a second cmd doesn't
-    * accidentally land back-to-back.
+    * Uses `waitSamplingWhere(cmd.ready)` rather than polling because the
+    * controller's `cmd.ready` only rises in the idle/started/ wedged hubs —
+    * between Issue/Wait pairs at the bit-ctrl level it stays low for many
+    * cycles. Drop `valid` on the same cycle we observe `ready` (== `fire`) so a
+    * second cmd doesn't accidentally land back-to-back.
     */
   private def issueCmd(
       rig: Rig,
@@ -123,9 +110,8 @@ object I2cByteControllerSim {
 
   /** Wait for one [[ByteRsp]] and snapshot its fields.
     *
-    * Snapshots `data`/`ackIn`/`status` while `valid` is still true,
-    * then drops `ready` next cycle so a stale `ready` doesn't
-    * consume the next response.
+    * Snapshots `data`/`ackIn`/`status` while `valid` is still true, then drops
+    * `ready` next cycle so a stale `ready` doesn't consume the next response.
     */
   private def expectRsp(rig: Rig): ByteRspSnapshot = {
     rig.io.rsp.ready #= true
@@ -146,55 +132,70 @@ object I2cByteControllerSim {
   // runner exits cleanly and `make sim-bytectrl` exercises the full
   // build/run path without spinning a single DUT cycle.
 
-  /** AddrWrite + WriteData + Stop, target ACKs both bytes.
-    * Smoke test of the happy path.
+  /** AddrWrite + WriteData + Stop, target ACKs both bytes. Smoke test of the
+    * happy path.
     *
     * Asserts:
     *   - Each cmd produces exactly one rsp (3 cmds, 3 rsps).
     *   - All three rsps carry status = Ok.
     *   - Both write rsps carry ackIn = false (target accepted).
     *   - After Stop, the bus is released by the controller (both
-    *     `bus.scl.write` and `bus.sda.write` are high). The wired-AND
-    *     plus the target's idle-released drives mean the bus is at
-    *     idle.
+    *     `bus.scl.write` and `bus.sda.write` are high). The wired-AND plus the
+    *     target's idle-released drives mean the bus is at idle.
     */
   private def caseSmokeWriteByte(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
-    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-write-byte") { rig =>
-      rig.clockDomain.forkStimulus(period = 10)
-      rig.io.cmd.valid #= false
-      rig.io.rsp.ready #= false
-      rig.clockDomain.waitSampling(5)
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-write-byte") {
+      rig =>
+        rig.clockDomain.forkStimulus(period = 10)
+        rig.io.cmd.valid #= false
+        rig.io.rsp.ready #= false
+        rig.clockDomain.waitSampling(5)
 
-      // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
-      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
-      val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+        // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
+        issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+        val r1 = expectRsp(rig)
+        assert(
+          r1.status == ByteRspStatus.Ok,
+          s"addr: status=${r1.status}, expected Ok"
+        )
+        assert(
+          !r1.ackIn,
+          s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+        )
 
-      // WriteData(0xA5).
-      issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
-      val r2 = expectRsp(rig)
-      assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
-      assert(!r2.ackIn, s"data: target NAK'd (ackIn=true); expected ACK (false)")
+        // WriteData(0xA5).
+        issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
+        val r2 = expectRsp(rig)
+        assert(
+          r2.status == ByteRspStatus.Ok,
+          s"data: status=${r2.status}, expected Ok"
+        )
+        assert(
+          !r2.ackIn,
+          s"data: target NAK'd (ackIn=true); expected ACK (false)"
+        )
 
-      // Stop.
-      issueCmd(rig, ByteCmdKind.Stop)
-      val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+        // Stop.
+        issueCmd(rig, ByteCmdKind.Stop)
+        val r3 = expectRsp(rig)
+        assert(
+          r3.status == ByteRspStatus.Ok,
+          s"stop: status=${r3.status}, expected Ok"
+        )
 
-      // Let the bus settle, then check it's released.
-      rig.clockDomain.waitSampling(20)
-      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
-      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+        // Let the bus settle, then check it's released.
+        rig.clockDomain.waitSampling(20)
+        assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+        assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
 
-      println("OK: caseSmokeWriteByte")
+        println("OK: caseSmokeWriteByte")
     }
   }
 
-  /** AddrRead + ReadData(NAK) + Stop, target sends 0xA5.
-    * Smoke test of the read direction.
+  /** AddrRead + ReadData(NAK) + Stop, target sends 0xA5. Smoke test of the read
+    * direction.
     */
   private def caseSmokeReadByte(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
@@ -208,24 +209,39 @@ object I2cByteControllerSim {
       // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
       issueCmd(rig, ByteCmdKind.AddrRead, data = 0x50 << 1)
       val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(
+        !r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
 
       // ReadData(NAK) -- single-byte read, so we tell the controller
       // to send NAK on the master ACK slot to signal end-of-read.
       issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
       val r2 = expectRsp(rig)
-      assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
+      assert(
+        r2.status == ByteRspStatus.Ok,
+        s"data: status=${r2.status}, expected Ok"
+      )
       // ackIn is meaningless on a ReadData rsp (the controller drove
       // ACK itself); the load-bearing check is `data` -- the byte we
       // received from the slave. Default BehaviouralI2cTarget sends
       // 0x55 (initial value of `readByte`).
-      assert(r2.data == 0x55, s"data: got 0x${r2.data.toString(16)}, expected 0x55")
+      assert(
+        r2.data == 0x55,
+        s"data: got 0x${r2.data.toString(16)}, expected 0x55"
+      )
 
       // Stop.
       issueCmd(rig, ByteCmdKind.Stop)
       val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+      assert(
+        r3.status == ByteRspStatus.Ok,
+        s"stop: status=${r3.status}, expected Ok"
+      )
 
       // Let the bus settle, then check it's released.
       rig.clockDomain.waitSampling(20)
@@ -236,50 +252,65 @@ object I2cByteControllerSim {
     }
   }
 
-  /** AddrWrite + WriteData × 3 + Stop. Verifies the FSM stays
-    * addressed across data bytes (no spurious Start between bytes).
+  /** AddrWrite + WriteData × 3 + Stop. Verifies the FSM stays addressed across
+    * data bytes (no spurious Start between bytes).
     */
   private def caseMultiByteWrite(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
     val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
-    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("multi-write-byte") { rig =>
-      rig.clockDomain.forkStimulus(period = 10)
-      rig.io.cmd.valid #= false
-      rig.io.rsp.ready #= false
-      rig.clockDomain.waitSampling(5)
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("multi-write-byte") {
+      rig =>
+        rig.clockDomain.forkStimulus(period = 10)
+        rig.io.cmd.valid #= false
+        rig.io.rsp.ready #= false
+        rig.clockDomain.waitSampling(5)
 
-      // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
-      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
-      val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+        // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
+        issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+        val r1 = expectRsp(rig)
+        assert(
+          r1.status == ByteRspStatus.Ok,
+          s"addr: status=${r1.status}, expected Ok"
+        )
+        assert(
+          !r1.ackIn,
+          s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+        )
 
-      // WriteData(0xA5).
-      for (i <- 0 until 3) {
-        issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
-        val r2 = expectRsp(rig)
-        assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
-        assert(!r2.ackIn, s"data: target NAK'd (ackIn=true); expected ACK (false)")
-      }
+        // WriteData(0xA5).
+        for (i <- 0 until 3) {
+          issueCmd(rig, ByteCmdKind.WriteData, data = 0xa5)
+          val r2 = expectRsp(rig)
+          assert(
+            r2.status == ByteRspStatus.Ok,
+            s"data: status=${r2.status}, expected Ok"
+          )
+          assert(
+            !r2.ackIn,
+            s"data: target NAK'd (ackIn=true); expected ACK (false)"
+          )
+        }
 
-      // Stop.
-      issueCmd(rig, ByteCmdKind.Stop)
-      val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+        // Stop.
+        issueCmd(rig, ByteCmdKind.Stop)
+        val r3 = expectRsp(rig)
+        assert(
+          r3.status == ByteRspStatus.Ok,
+          s"stop: status=${r3.status}, expected Ok"
+        )
 
-      // Let the bus settle, then check it's released.
-      rig.clockDomain.waitSampling(20)
-      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
-      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+        // Let the bus settle, then check it's released.
+        rig.clockDomain.waitSampling(20)
+        assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+        assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
 
-      println("OK: caseMultiWriteByte")
+        println("OK: caseMultiWriteByte")
     }
   }
 
-  /** AddrRead + ReadData(ACK) × 2 + ReadData(NAK) + Stop. Verifies
-    * `ackOut` propagates correctly to the master ACK slot, and that
-    * the final NAK doesn't trip mustTerminate (it's the legal end
-    * of a read).
+  /** AddrRead + ReadData(ACK) × 2 + ReadData(NAK) + Stop. Verifies `ackOut`
+    * propagates correctly to the master ACK slot, and that the final NAK
+    * doesn't trip mustTerminate (it's the legal end of a read).
     */
   private def caseMultiByteRead(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
@@ -293,26 +324,41 @@ object I2cByteControllerSim {
       // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
       issueCmd(rig, ByteCmdKind.AddrRead, data = 0x50 << 1)
       val r1 = expectRsp(rig)
-      assert(r1.status == ByteRspStatus.Ok, s"addr: status=${r1.status}, expected Ok")
-      assert(!r1.ackIn, s"addr: target NAK'd (ackIn=true); expected ACK (false)")
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(
+        !r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
 
       for (i <- 0 until 3) {
         // ReadData(NAK) -- single-byte read, so we tell the controller
         // to send NAK on the master ACK slot to signal end-of-read.
         issueCmd(rig, ByteCmdKind.ReadData, ackOut = i == 2)
         val r2 = expectRsp(rig)
-        assert(r2.status == ByteRspStatus.Ok, s"data: status=${r2.status}, expected Ok")
+        assert(
+          r2.status == ByteRspStatus.Ok,
+          s"data: status=${r2.status}, expected Ok"
+        )
         // ackIn is meaningless on a ReadData rsp (the controller drove
         // ACK itself); the load-bearing check is `data` -- the byte we
         // received from the slave. Default BehaviouralI2cTarget sends
         // 0xA5 (initial value of `readByte`).
-        assert(r2.data == 0x55, s"data: got 0x${r2.data.toString(16)}, expected 0x55")
+        assert(
+          r2.data == 0x55,
+          s"data: got 0x${r2.data.toString(16)}, expected 0x55"
+        )
       }
 
       // Stop.
       issueCmd(rig, ByteCmdKind.Stop)
       val r3 = expectRsp(rig)
-      assert(r3.status == ByteRspStatus.Ok, s"stop: status=${r3.status}, expected Ok")
+      assert(
+        r3.status == ByteRspStatus.Ok,
+        s"stop: status=${r3.status}, expected Ok"
+      )
 
       // Let the bus settle, then check it's released.
       rig.clockDomain.waitSampling(20)
@@ -323,70 +369,64 @@ object I2cByteControllerSim {
     }
   }
 
-  /** AddrWrite + WriteData(reg) + RepStart + AddrRead +
-    * ReadData(NAK) + Stop. Verifies a full register-read round trip,
-    * including the direction flip via RepStart.
+  /** AddrWrite + WriteData(reg) + RepStart + AddrRead + ReadData(NAK) + Stop.
+    * Verifies a full register-read round trip, including the direction flip via
+    * RepStart.
     */
   private def caseRepeatedStartReadAfterWrite(): Unit = {
     println("PENDING: caseRepeatedStartReadAfterWrite")
   }
 
-  /** Target NAKs the address byte. Assert `ackIn = 1`,
-    * `mustTerminate` is set, and a subsequent Stop is accepted
-    * (returning the FSM to idle).
+  /** Target NAKs the address byte. Assert `ackIn = 1`, `mustTerminate` is set,
+    * and a subsequent Stop is accepted (returning the FSM to idle).
     */
   private def caseAddressNak(): Unit = {
     println("PENDING: caseAddressNak")
   }
 
-  /** Target NAKs the second data byte mid-burst. Assert the rsp
-    * carries `ackIn = 1`, `mustTerminate` latches, and only Stop /
-    * RepStart are accepted next.
+  /** Target NAKs the second data byte mid-burst. Assert the rsp carries `ackIn
+    * \= 1`, `mustTerminate` latches, and only Stop / RepStart are accepted
+    * next.
     */
   private def caseDataNak(): Unit = {
     println("PENDING: caseDataNak")
   }
 
-  /** A second master pulls SDA low during the Start condition.
-    * Assert the rsp carries `status = ArbLost` and the FSM
-    * returns to idle without driving the bus further.
+  /** A second master pulls SDA low during the Start condition. Assert the rsp
+    * carries `status = ArbLost` and the FSM returns to idle without driving the
+    * bus further.
     */
   private def caseArbLossDuringStart(): Unit = {
     println("PENDING: caseArbLossDuringStart")
   }
 
-  /** Contention on SDA mid-byte (controller drives 1, second
-    * master pulls 0). Assert the controller's `*WaitState`
-    * short-circuits to the matching `*RspState` with
-    * `status = ArbLost`, and that `arbLost` is reported exactly
-    * once.
+  /** Contention on SDA mid-byte (controller drives 1, second master pulls 0).
+    * Assert the controller's `*WaitState` short-circuits to the matching
+    * `*RspState` with `status = ArbLost`, and that `arbLost` is reported
+    * exactly once.
     */
   private def caseArbLossMidByte(): Unit = {
     println("PENDING: caseArbLossMidByte")
   }
 
-  /** From idle, every non-Addr* command (WriteData, ReadData,
-    * RepStart, Stop) must emit `status = InvalidSeq` and leave
-    * the FSM in idle.
+  /** From idle, every non-Addr* command (WriteData, ReadData, RepStart, Stop)
+    * must emit `status = InvalidSeq` and leave the FSM in idle.
     */
   private def caseInvalidSeqFromIdle(): Unit = {
     println("PENDING: caseInvalidSeqFromIdle")
   }
 
-  /** While `mustTerminate` is latched, every non-terminator
-    * command (AddrWrite, AddrRead, WriteData, ReadData) must emit
-    * `status = InvalidSeq`. Only Stop / RepStart should clear the
-    * wedged state.
+  /** While `mustTerminate` is latched, every non-terminator command (AddrWrite,
+    * AddrRead, WriteData, ReadData) must emit `status = InvalidSeq`. Only Stop
+    * / RepStart should clear the wedged state.
     */
   private def caseInvalidSeqWedged(): Unit = {
     println("PENDING: caseInvalidSeqWedged")
   }
 
   /** Direction mismatch within a transaction:
-    *   - WriteData on a read transaction (kind = AddrRead) →
-    *     InvalidSeq.
-    *   - ReadData on a write transaction (kind = AddrWrite) →
-    *     InvalidSeq.
+    *   - WriteData on a read transaction (kind = AddrRead) → InvalidSeq.
+    *   - ReadData on a write transaction (kind = AddrWrite) → InvalidSeq.
     */
   private def caseInvalidSeqDirectionMismatch(): Unit = {
     println("PENDING: caseInvalidSeqDirectionMismatch")

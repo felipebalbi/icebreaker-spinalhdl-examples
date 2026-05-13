@@ -6,18 +6,17 @@ import spinal.lib.fsm._
 
 /** UART receive frame sequencer (the "control" half of the RX path).
   *
-  * Mirror of [[TxFsm]]: drives the receive path through
-  * `Idle → StartVerify → Data×N → [Parity] → Stop×M → Idle` and emits the
-  * assembled byte on a [[Stream]] when a frame completes cleanly. Composes a
-  * [[RxShiftReg]] for the actual bit accumulation; this FSM owns timing and
-  * sequencing only.
+  * Mirror of [[TxFsm]]: drives the receive path through `Idle → StartVerify →
+  * Data×N → [Parity] → Stop×M → Idle` and emits the assembled byte on a
+  * [[Stream]] when a frame completes cleanly. Composes a [[RxShiftReg]] for the
+  * actual bit accumulation; this FSM owns timing and sequencing only.
   *
   * ==Frame on the wire==
   *
-  * UART RX is the inverse of TX. The line idles high; a frame is bracketed
-  * by a low start bit and one or two high stop bits, with `cfg.dataBits` data
-  * bits LSB-first in between (and an optional parity bit before the stop
-  * bits when `cfg.parity != ParityType.None`).
+  * UART RX is the inverse of TX. The line idles high; a frame is bracketed by a
+  * low start bit and one or two high stop bits, with `cfg.dataBits` data bits
+  * LSB-first in between (and an optional parity bit before the stop bits when
+  * `cfg.parity != ParityType.None`).
   * {{{
   *   idle   : line stays high
   *   start  : single low bit, one bit period long
@@ -34,23 +33,22 @@ import spinal.lib.fsm._
   * falling edge of the start bit and then sample at what we *think* is the
   * middle of each subsequent bit. To keep the sample point inside the bit
   * window despite ±2–3% baud skew between the two ends and despite a noisy
-  * start-bit edge, we use 16× oversampling: the [[BaudGenerator]] (wired to
-  * the wrapper, not to this FSM directly) produces a tick at
-  * `oversample × baudRate`, and this FSM counts those ticks to land samples
-  * at bit centres.
+  * start-bit edge, we use 16× oversampling: the [[BaudGenerator]] (wired to the
+  * wrapper, not to this FSM directly) produces a tick at `oversample ×
+  * baudRate`, and this FSM counts those ticks to land samples at bit centres.
   *
   * The standard trick for "land at bit centre after a noisy edge" is the
-  * **half-bit verify**: when we see a falling edge in IDLE, we don't just
-  * call it a start bit and proceed. Instead we wait `oversample/2` ticks
-  * (half a bit period) and resample; only if the line is *still* low do we
-  * commit to the frame. A 1-cycle line glitch (induction crosstalk, ESD,
-  * crap on the cable) is rejected — without this check, every glitch on an
-  * idle line would corrupt a frame.
+  * **half-bit verify**: when we see a falling edge in IDLE, we don't just call
+  * it a start bit and proceed. Instead we wait `oversample/2` ticks (half a bit
+  * period) and resample; only if the line is *still* low do we commit to the
+  * frame. A 1-cycle line glitch (induction crosstalk, ESD, crap on the cable)
+  * is rejected — without this check, every glitch on an idle line would corrupt
+  * a frame.
   *
   * After the half-bit verify the FSM samples every `oversample` ticks. The
-  * first such sample lands at the centre of bit 0 (the LSB), and the
-  * subsequent samples land at the centres of bits 1, 2, …, dataBits−1, then
-  * (optionally) parity, then stop. End-to-end, samples land at:
+  * first such sample lands at the centre of bit 0 (the LSB), and the subsequent
+  * samples land at the centres of bits 1, 2, …, dataBits−1, then (optionally)
+  * parity, then stop. End-to-end, samples land at:
   * {{{
   *   start (verify only)  ─┐
   *   bit 0 centre          │ +oversample
@@ -63,70 +61,66 @@ import spinal.lib.fsm._
   *
   * ==Tick contract — different from TX!==
   *
-  * The [[BaudGenerator]] feeding `io.tick` runs at `oversample × baudRate`
-  * and **must run continuously**, not gated by `busy`. Reason: we have to
-  * detect a start-bit falling edge while the FSM is in `idleState`, and the
-  * half-bit verify needs ticks immediately after the edge — there is no
-  * "enable on busy" hook that could ramp the generator up in time. A
-  * free-running RX baud generator costs nothing measurable in power but
-  * gives us a consistent sampling phase reference at all times.
+  * The [[BaudGenerator]] feeding `io.tick` runs at `oversample × baudRate` and
+  * **must run continuously**, not gated by `busy`. Reason: we have to detect a
+  * start-bit falling edge while the FSM is in `idleState`, and the half-bit
+  * verify needs ticks immediately after the edge — there is no "enable on busy"
+  * hook that could ramp the generator up in time. A free-running RX baud
+  * generator costs nothing measurable in power but gives us a consistent
+  * sampling phase reference at all times.
   *
   * (Contrast with TX: the TX baud generator IS gated by `busy`, because the
   * start bit's width depends on phase being zero at the start.)
   *
   * ==Composition with RxShiftReg==
   *
-  * We instantiate [[RxShiftReg]] internally rather than carrying a
-  * private shift register, mirroring the [[TxFsm]] / [[TxShiftReg]] /
-  * [[UartTx]] split:
-  *   - On entry to `dataState`, pulse `rsr.io.clear := True` for one cycle
-  *     so the shifter starts each frame at zero. Doing this on
-  *     `dataState.onEntry` (rather than `idleState → startVerifyState`)
-  *     means a rejected glitch doesn't cost us a clear pulse — only
-  *     confirmed start bits do.
-  *   - On each oversample-tick boundary inside `dataState`, pulse
-  *     `rsr.io.shift := True`. `rsr.io.sample` is wired to `io.rx`
-  *     continuously, so the bit shifted in is whatever the line shows at
-  *     that edge (which, by construction, is at the centre of a data bit).
-  *   - The assembled byte is exposed on `rsr.io.data`, which we wire
-  *     straight to `io.payload.payload`.
+  * We instantiate [[RxShiftReg]] internally rather than carrying a private
+  * shift register, mirroring the [[TxFsm]] / [[TxShiftReg]] / [[UartTx]] split:
+  *   - On entry to `dataState`, pulse `rsr.io.clear := True` for one cycle so
+  *     the shifter starts each frame at zero. Doing this on `dataState.onEntry`
+  *     (rather than `idleState → startVerifyState`) means a rejected glitch
+  *     doesn't cost us a clear pulse — only confirmed start bits do.
+  *   - On each oversample-tick boundary inside `dataState`, pulse `rsr.io.shift
+  *     := True`. `rsr.io.sample` is wired to `io.rx` continuously, so the bit
+  *     shifted in is whatever the line shows at that edge (which, by
+  *     construction, is at the centre of a data bit).
+  *   - The assembled byte is exposed on `rsr.io.data`, which we wire straight
+  *     to `io.payload.payload`.
   *
   * RxShiftReg's `clear-wins-over-shift` priority means the dataState entry
-  * cycle (which only raises `clear`) is unambiguous, and the FSM never
-  * raises both in the same cycle anyway.
+  * cycle (which only raises `clear`) is unambiguous, and the FSM never raises
+  * both in the same cycle anyway.
   *
   * ==Error semantics==
   *
-  *   - `framingError`: pulsed if the stop bit reads low (the frame's
-  *     framing is broken — usually means a baud-rate mismatch or a
-  *     mid-frame disconnection).
+  *   - `framingError`: pulsed if the stop bit reads low (the frame's framing is
+  *     broken — usually means a baud-rate mismatch or a mid-frame
+  *     disconnection).
   *   - `parityError`: pulsed if the received parity bit doesn't match the
   *     expected value computed from the data bits. When `cfg.parity ==
-  *     ParityType.None` the parity state is unreachable and this signal
-  *     never fires.
+  *     ParityType.None` the parity state is unreachable and this signal never
+  *     fires.
   *   - `overrun`: pulsed if a frame completes (stop bit verified) while a
-  *     previous frame's `payloadValidReg` is still high — the consumer
-  *     hasn't fired the Stream handshake yet, so we have nowhere to put the
-  *     new byte.
+  *     previous frame's `payloadValidReg` is still high — the consumer hasn't
+  *     fired the Stream handshake yet, so we have nowhere to put the new byte.
   *
-  * All three are *one-cycle combinational pulses*: they go high in the
-  * exact cycle the FSM detects the condition (the same cycle as the
-  * `goto(idleState)` for framing/parity, or the cycle the new frame's
-  * stop bit verifies for overrun). They fall back to `False` the next
-  * cycle on their own — there is no register stage and no idle-state
-  * clear. By contrast, `valid` is sticky-until-fire. A consumer that
-  * needs to observe an error must either latch it on the same cycle
-  * (e.g. by sampling alongside `valid`) or push it into a sticky
-  * upstream register such as the regif RC field in `UartController`.
+  * All three are *one-cycle combinational pulses*: they go high in the exact
+  * cycle the FSM detects the condition (the same cycle as the `goto(idleState)`
+  * for framing/parity, or the cycle the new frame's stop bit verifies for
+  * overrun). They fall back to `False` the next cycle on their own — there is
+  * no register stage and no idle-state clear. By contrast, `valid` is
+  * sticky-until-fire. A consumer that needs to observe an error must either
+  * latch it on the same cycle (e.g. by sampling alongside `valid`) or push it
+  * into a sticky upstream register such as the regif RC field in
+  * `UartController`.
   *
   * ==Parity==
   *
-  * Same accumulator pattern as [[TxFsm]]: seed `parityBit` to `False` for
-  * Even or `True` for Odd on entry to `dataState`, XOR each received data
-  * bit into it on each Data tick. By the time we reach `parityState`,
-  * `parityBit` holds the value the *received* parity bit should equal —
-  * `xor(data)` for Even, `~xor(data)` for Odd — and we just compare it to
-  * the line.
+  * Same accumulator pattern as [[TxFsm]]: seed `parityBit` to `False` for Even
+  * or `True` for Odd on entry to `dataState`, XOR each received data bit into
+  * it on each Data tick. By the time we reach `parityState`, `parityBit` holds
+  * the value the *received* parity bit should equal — `xor(data)` for Even,
+  * `~xor(data)` for Odd — and we just compare it to the line.
   *
   * ==Sub-blocks called out in TODO.md==
   *
@@ -140,54 +134,51 @@ case class RxFsm(cfg: UartConfig) extends Component {
   val io = new Bundle {
 
     /** Synchronised RX line — i.e. the output of [[RxSync]], in our clock
-      * domain. Idles high; falls low to mark a start bit. The FSM samples
-      * this on every relevant `io.tick` boundary; for everything else it
-      * only cares about `io.rx.fall` (used to detect start-bit edges in
-      * `idleState`).
+      * domain. Idles high; falls low to mark a start bit. The FSM samples this
+      * on every relevant `io.tick` boundary; for everything else it only cares
+      * about `io.rx.fall` (used to detect start-bit edges in `idleState`).
       */
     val rx = in Bool ()
 
     /** Free-running oversample-rate strobe from the [[BaudGenerator]] — one
-      * pulse per `clkFreqHz / (baudRate * cfg.oversample)` cycles. Unlike
-      * the TX side, this generator is NOT gated by `busy`; the half-bit
-      * verify after a start-bit edge needs ticks immediately, and the FSM
-      * has no way to enable the generator early enough.
+      * pulse per `clkFreqHz / (baudRate * cfg.oversample)` cycles. Unlike the
+      * TX side, this generator is NOT gated by `busy`; the half-bit verify
+      * after a start-bit edge needs ticks immediately, and the FSM has no way
+      * to enable the generator early enough.
       */
     val tick = in Bool ()
 
-    /** Received-byte output, ready/valid handshake. The FSM raises
-      * `valid` on the cycle the stop bit is verified (and never raises it
-      * in the cycle of a framing or parity error). `payload` is the
-      * assembled byte, LSB-first in bit 0. The handshake is driven by the
-      * consumer firing `ready` while `valid` is high; that cycle clears
-      * the internal `payloadValidReg`.
+    /** Received-byte output, ready/valid handshake. The FSM raises `valid` on
+      * the cycle the stop bit is verified (and never raises it in the cycle of
+      * a framing or parity error). `payload` is the assembled byte, LSB-first
+      * in bit 0. The handshake is driven by the consumer firing `ready` while
+      * `valid` is high; that cycle clears the internal `payloadValidReg`.
       */
     val payload = master Stream (Bits(cfg.dataBits bits))
 
-    /** One-cycle pulse the cycle a frame ends with the stop bit observed
-      * low. The frame is dropped (no `valid` pulse). Slow consumers
-      * should latch this into a sticky register — `UartController`
-      * does so via its regif RC field.
+    /** One-cycle pulse the cycle a frame ends with the stop bit observed low.
+      * The frame is dropped (no `valid` pulse). Slow consumers should latch
+      * this into a sticky register — `UartController` does so via its regif RC
+      * field.
       */
     val framingError = out Bool ()
 
-    /** One-cycle pulse the cycle a frame ends with the parity bit
-      * mismatched against the accumulated XOR-of-data. The frame is
-      * dropped (no `valid` pulse). Only ever fires when
-      * `cfg.parity != ParityType.None`. Latch as for `framingError`.
+    /** One-cycle pulse the cycle a frame ends with the parity bit mismatched
+      * against the accumulated XOR-of-data. The frame is dropped (no `valid`
+      * pulse). Only ever fires when `cfg.parity != ParityType.None`. Latch as
+      * for `framingError`.
       */
     val parityError = out Bool ()
 
     /** One-cycle pulse the cycle a fresh frame's stop bit verifies while a
       * previous frame's payload has not yet been consumed. The new byte is
-      * emitted on `valid` (and the previous one is lost — see the review
-      * notes in TODO.md). Latch as for `framingError`.
+      * emitted on `valid` (and the previous one is lost — see the review notes
+      * in TODO.md). Latch as for `framingError`.
       */
     val overrun = out Bool ()
 
-    /** High whenever the FSM is **not** in Idle. Diagnostic — the wrapper
-      * may use it to drive an LED or to gate `RTS` low when a frame is in
-      * flight.
+    /** High whenever the FSM is **not** in Idle. Diagnostic — the wrapper may
+      * use it to drive an LED or to gate `RTS` low when a frame is in flight.
       */
     val busy = out Bool ()
   }

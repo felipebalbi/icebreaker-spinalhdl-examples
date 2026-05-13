@@ -6,42 +6,36 @@ import spinal.core.sim._
 /** Standalone sim for [[UartRx]] — black-box test of the wrapper.
   *
   * `UartRx` is just composition (RxSync + BaudGenerator + RxFsm). The
-  * sub-blocks are already covered by their own sims; the value of this
-  * sim is exclusively in catching wiring mistakes between them.
+  * sub-blocks are already covered by their own sims; the value of this sim is
+  * exclusively in catching wiring mistakes between them.
   *
   * Strategy
-  *   - Drive `io.rx` as a fake UART line, level-by-level, holding each
-  *     bit for one full bit period (`clkFreqHz / baudRate` system
-  *     clocks).
-  *   - Watch `io.payload` for the assembled byte and the side-band
-  *     flags for errors.
-  *   - **No internal tick fork** — unlike [[RxFsmSim]] the BaudGenerator
-  *     is now inside the DUT. We just feed it cycles by running the
-  *     clock.
-  *   - **No fake RxSync either** — the real one runs and adds 2 cycles
-  *     of latency. We pad bit periods generously so this is invisible.
+  *   - Drive `io.rx` as a fake UART line, level-by-level, holding each bit for
+  *     one full bit period (`clkFreqHz / baudRate` system clocks).
+  *   - Watch `io.payload` for the assembled byte and the side-band flags for
+  *     errors.
+  *   - **No internal tick fork** — unlike [[RxFsmSim]] the BaudGenerator is now
+  *     inside the DUT. We just feed it cycles by running the clock.
+  *   - **No fake RxSync either** — the real one runs and adds 2 cycles of
+  *     latency. We pad bit periods generously so this is invisible.
   *
   * What we verify
-  *   1. **Post-reset idle.** No `valid`, no error flags.
-  *   2. **Byte sweep at 8N1.** A handful of patterns chosen for
-  *      shift-direction coverage (0x00, 0xFF, 0xAA, 0x55, 0x80, 0x01,
-  *      0xAD).
-  *   3. **Config-matrix smoke.** Single byte through 8N2, 8E1, 8O1 to
-  *      prove the parity/stop-bit knobs are plumbed all the way through
-  *      the wrapper.
-  *   4. **Framing error.** Stop bit forced low — expect `framingError`,
-  *      no `valid`. Then send a clean frame to verify recovery.
-  *   5. **Parity error.** Parity bit deliberately wrong — expect
-  *      `parityError`, no `valid`.
-  *   6. **Overrun.** Two frames with `ready` held low — expect
-  *      `overrun`, `valid` stays high throughout.
-  *   7. **`useRts` smoke.** When `cfg.useRts = true`, `io.rts` mirrors
+  *   1. **Post-reset idle.** No `valid`, no error flags. 2. **Byte sweep at
+  *      8N1.** A handful of patterns chosen for shift-direction coverage (0x00,
+  *      0xFF, 0xAA, 0x55, 0x80, 0x01, 0xAD). 3. **Config-matrix smoke.** Single
+  *      byte through 8N2, 8E1, 8O1 to prove the parity/stop-bit knobs are
+  *      plumbed all the way through the wrapper. 4. **Framing error.** Stop bit
+  *      forced low — expect `framingError`, no `valid`. Then send a clean frame
+  *      to verify recovery. 5. **Parity error.** Parity bit deliberately wrong
+  *      — expect `parityError`, no `valid`. 6. **Overrun.** Two frames with
+  *      `ready` held low — expect `overrun`, `valid` stays high throughout. 7.
+  *      **`useRts` smoke.** When `cfg.useRts = true`, `io.rts` mirrors
   *      `io.payload.ready`.
   *
-  * Important: every fork that drives `io.rx` is captured to a `val`
-  * and `.join()`'d before the main thread writes `io.rx` again. This
-  * is the lesson from `RxFsmSim` — two threads racing for the same DUT
-  * input is undefined behaviour in SpinalSim.
+  * Important: every fork that drives `io.rx` is captured to a `val` and
+  * `.join()`'d before the main thread writes `io.rx` again. This is the lesson
+  * from `RxFsmSim` — two threads racing for the same DUT input is undefined
+  * behaviour in SpinalSim.
   *
   * Run: `sbt "runMain uart.UartRxSim"`
   */
@@ -145,9 +139,18 @@ object UartRxSim {
         // ------------------------------------------------------------------
         // (1) Post-reset idle.
         // ------------------------------------------------------------------
-        assert(!dut.io.payload.valid.toBoolean, s"[$cfgLabel] valid high at reset")
-        assert(!dut.io.framingError.toBoolean, s"[$cfgLabel] framingError high at reset")
-        assert(!dut.io.parityError.toBoolean, s"[$cfgLabel] parityError high at reset")
+        assert(
+          !dut.io.payload.valid.toBoolean,
+          s"[$cfgLabel] valid high at reset"
+        )
+        assert(
+          !dut.io.framingError.toBoolean,
+          s"[$cfgLabel] framingError high at reset"
+        )
+        assert(
+          !dut.io.parityError.toBoolean,
+          s"[$cfgLabel] parityError high at reset"
+        )
         assert(!dut.io.overrun.toBoolean, s"[$cfgLabel] overrun high at reset")
 
         // ------------------------------------------------------------------
@@ -163,8 +166,14 @@ object UartRxSim {
             (payload & mask) == (p.toLong & mask),
             f"[$cfgLabel byte-sweep] expected 0x${p & mask.toInt}%X, got 0x${payload & mask}%X"
           )
-          assert(!fE, f"[$cfgLabel byte-sweep] unexpected framingError on 0x$p%X")
-          assert(!pE, f"[$cfgLabel byte-sweep] unexpected parityError on 0x$p%X")
+          assert(
+            !fE,
+            f"[$cfgLabel byte-sweep] unexpected framingError on 0x$p%X"
+          )
+          assert(
+            !pE,
+            f"[$cfgLabel byte-sweep] unexpected parityError on 0x$p%X"
+          )
           assert(!oE, f"[$cfgLabel byte-sweep] unexpected overrun on 0x$p%X")
           drv.join()
         }
@@ -176,7 +185,10 @@ object UartRxSim {
         val framingByte = patterns.head
         val framingDrv = fork {
           driveBits(
-            frameBits(framingByte, stopOverride = Some(Seq.fill(cfg.stopBits)(false)))
+            frameBits(
+              framingByte,
+              stopOverride = Some(Seq.fill(cfg.stopBits)(false))
+            )
           )
           idleLine()
         }
@@ -191,8 +203,14 @@ object UartRxSim {
           if (dut.io.payload.valid.toBoolean) sawValid = true
           f += 1
         }
-        assert(sawFraming, s"[$cfgLabel] framing error: expected framingError pulse")
-        assert(!sawValid, s"[$cfgLabel] framing error: valid raised despite failure")
+        assert(
+          sawFraming,
+          s"[$cfgLabel] framing error: expected framingError pulse"
+        )
+        assert(
+          !sawValid,
+          s"[$cfgLabel] framing error: valid raised despite failure"
+        )
         framingDrv.join()
 
         // (3b) Recover with a clean frame.
@@ -206,7 +224,10 @@ object UartRxSim {
           (rec & mask) == (patterns.head.toLong & mask),
           s"[$cfgLabel] recovery after framing: bad payload"
         )
-        assert(!fE2 && !pE2 && !oE2, s"[$cfgLabel] recovery after framing: spurious flags")
+        assert(
+          !fE2 && !pE2 && !oE2,
+          s"[$cfgLabel] recovery after framing: spurious flags"
+        )
         recoveryDrv.join()
 
         // ------------------------------------------------------------------
@@ -241,8 +262,14 @@ object UartRxSim {
             if (dut.io.payload.valid.toBoolean) sawValid2 = true
             p2 += 1
           }
-          assert(sawParity, s"[$cfgLabel] parity error: expected parityError pulse")
-          assert(!sawValid2, s"[$cfgLabel] parity error: valid raised despite failure")
+          assert(
+            sawParity,
+            s"[$cfgLabel] parity error: expected parityError pulse"
+          )
+          assert(
+            !sawValid2,
+            s"[$cfgLabel] parity error: valid raised despite failure"
+          )
           parityDrv.join()
           idleLine(4)
         }
@@ -274,7 +301,10 @@ object UartRxSim {
           op += 1
         }
         assert(sawOverrun, s"[$cfgLabel overrun] expected overrun pulse")
-        assert(!validDropped, s"[$cfgLabel overrun] valid dropped without ready firing")
+        assert(
+          !validDropped,
+          s"[$cfgLabel overrun] valid dropped without ready firing"
+        )
         // Drain.
         dut.io.payload.ready #= true
         dut.clockDomain.waitSampling(bitClocks)
@@ -316,13 +346,79 @@ object UartRxSim {
     val baud = 1000
 
     val configs: Seq[(UartConfig, Seq[Int])] = Seq(
-      (UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false, useRts = false), patterns8),
-      (UartConfig(clk, baud, 8, 2, ParityType.None, useCts = false, useRts = false), patterns8),
-      (UartConfig(clk, baud, 8, 1, ParityType.Even, useCts = false, useRts = false), patterns8),
-      (UartConfig(clk, baud, 8, 1, ParityType.Odd, useCts = false, useRts = false), patterns8),
-      (UartConfig(clk, baud, 5, 1, ParityType.None, useCts = false, useRts = false), patterns5),
+      (
+        UartConfig(
+          clk,
+          baud,
+          8,
+          1,
+          ParityType.None,
+          useCts = false,
+          useRts = false
+        ),
+        patterns8
+      ),
+      (
+        UartConfig(
+          clk,
+          baud,
+          8,
+          2,
+          ParityType.None,
+          useCts = false,
+          useRts = false
+        ),
+        patterns8
+      ),
+      (
+        UartConfig(
+          clk,
+          baud,
+          8,
+          1,
+          ParityType.Even,
+          useCts = false,
+          useRts = false
+        ),
+        patterns8
+      ),
+      (
+        UartConfig(
+          clk,
+          baud,
+          8,
+          1,
+          ParityType.Odd,
+          useCts = false,
+          useRts = false
+        ),
+        patterns8
+      ),
+      (
+        UartConfig(
+          clk,
+          baud,
+          5,
+          1,
+          ParityType.None,
+          useCts = false,
+          useRts = false
+        ),
+        patterns5
+      ),
       // RTS path
-      (UartConfig(clk, baud, 8, 1, ParityType.None, useCts = false, useRts = true), patterns8)
+      (
+        UartConfig(
+          clk,
+          baud,
+          8,
+          1,
+          ParityType.None,
+          useCts = false,
+          useRts = true
+        ),
+        patterns8
+      )
     )
 
     for ((cfg, pats) <- configs) {

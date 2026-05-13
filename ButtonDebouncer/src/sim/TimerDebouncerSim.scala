@@ -6,24 +6,23 @@ import spinal.core.sim._
 /** Standalone sim for [[TimerDebouncer]].
   *
   * Strategy
-  *   - Use a tiny clock frequency / debounce time so the countdown is just
-  *     a handful of cycles. With clkFreqHz = 1_000_000 and debounceMs = 1
-  *     the window is `1_000_000 / 1000 * 1 = 1000` cycles — still too many.
-  *     The numerator-vs-divider math means the smallest non-degenerate
-  *     window we can express is 1 ms / 1 MHz = 1000 cycles; for the sim we
-  *     use 1 MHz / 1 ms = 1000 cycles and just live with the count.
+  *   - Use a tiny clock frequency / debounce time so the countdown is just a
+  *     handful of cycles. With clkFreqHz = 1_000_000 and debounceMs = 1 the
+  *     window is `1_000_000 / 1000 * 1 = 1000` cycles — still too many. The
+  *     numerator-vs-divider math means the smallest non-degenerate window we
+  *     can express is 1 ms / 1 MHz = 1000 cycles; for the sim we use 1 MHz / 1
+  *     ms = 1000 cycles and just live with the count.
   *   - To make the sim quick we instead bypass the helper and pass small
   *     numbers that result in `maxCount = 8` cycles by exploiting the
   *     `if`-guard at the bottom of `TimerDebouncer`. We construct it with
   *     `clkFreqHz = 8000, debounceMs = 1` => `(8000/1000)*1 = 8` cycles.
   *
   * What we verify
-  *   1. With steady-low input, `stable` stays low.
-  *   2. A bouncy input that never holds steady for a full window does NOT
-  *      commit (the timer keeps getting reset).
-  *   3. A clean rising edge held for >= window flips `stable` exactly once
-  *      and pulses `rising` for exactly one cycle.
-  *   4. A clean falling edge does the symmetric thing for `falling`.
+  *   1. With steady-low input, `stable` stays low. 2. A bouncy input that never
+  *      holds steady for a full window does NOT commit (the timer keeps getting
+  *      reset). 3. A clean rising edge held for >= window flips `stable`
+  *      exactly once and pulses `rising` for exactly one cycle. 4. A clean
+  *      falling edge does the symmetric thing for `falling`.
   *
   * Run: `sbt "runMain button_debouncer.TimerDebouncerSim"`
   */

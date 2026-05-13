@@ -6,74 +6,71 @@ import spinal.lib.fsm._
 
 /** One-bit-at-a-time I²C bus driver.
   *
-  * `I2cBitController` is the only block in this project that touches
-  * `I2cIo` directly. It owns SCL toggling, SDA setup/sample timing,
-  * START/STOP framing edges, and arbitration detection. Everything
-  * built on top of it (byte controller, address phase, ACK policy,
-  * register file) speaks bytes, not bits.
+  * `I2cBitController` is the only block in this project that touches `I2cIo`
+  * directly. It owns SCL toggling, SDA setup/sample timing, START/STOP framing
+  * edges, and arbitration detection. Everything built on top of it (byte
+  * controller, address phase, ACK policy, register file) speaks bytes, not
+  * bits.
   *
   * ==Command interface==
-  * The bit controller is a [[BitCmd]] consumer. Each command produces
-  * exactly one bus event:
+  * The bit controller is a [[BitCmd]] consumer. Each command produces exactly
+  * one bus event:
   *
-  *   - `Start`     : SDA falls while SCL is high (bus must be idle).
-  *   - `RepStart`  : repeated START — bus is already inside a
-  *                   transaction (SCL low), prep edges are produced
-  *                   first, then the same fall as `Start`.
-  *   - `Stop`      : SDA rises while SCL is high; honours `tBuf`
-  *                   before the next `Start` is accepted.
-  *   - `WriteBit`  : drive `txBit` for one full SCL pulse.
-  *   - `ReadBit`   : release SDA, sample mid-`tHigh` into `rxBit`.
-  *   - `Idle`      : explicit no-op synchronisation barrier.
+  *   - `Start` : SDA falls while SCL is high (bus must be idle).
+  *   - `RepStart` : repeated START — bus is already inside a transaction (SCL
+  *     low), prep edges are produced first, then the same fall as `Start`.
+  *   - `Stop` : SDA rises while SCL is high; honours `tBuf` before the next
+  *     `Start` is accepted.
+  *   - `WriteBit` : drive `txBit` for one full SCL pulse.
+  *   - `ReadBit` : release SDA, sample mid-`tHigh` into `rxBit`.
+  *   - `Idle` : explicit no-op synchronisation barrier.
   *
-  * The byte controller (Step 5) is responsible for sequencing these
-  * into address + data + ACK; the bit controller has no notion of
-  * "which bit number am I" or "is this an ACK slot".
+  * The byte controller (Step 5) is responsible for sequencing these into
+  * address + data + ACK; the bit controller has no notion of "which bit number
+  * am I" or "is this an ACK slot".
   *
   * ==FSM shape==
   * Every state follows the same idiom:
   *
-  *   - `onEntry` produces an edge (drives one of `sclDrive` /
-  *     `sdaDrive`) and loads `phaseCounter` with the dwell required
-  *     before the *next* edge. The counter is therefore loaded with
-  *     "time until exit", not "time since entry".
-  *   - `whenIsActive` decrements the counter and transitions when it
-  *     reaches zero. No bus changes happen mid-state (except the
-  *     mid-`tHigh` sample/arb-check in `bitHighState`).
+  *   - `onEntry` produces an edge (drives one of `sclDrive` / `sdaDrive`) and
+  *     loads `phaseCounter` with the dwell required before the *next* edge. The
+  *     counter is therefore loaded with "time until exit", not "time since
+  *     entry".
+  *   - `whenIsActive` decrements the counter and transitions when it reaches
+  *     zero. No bus changes happen mid-state (except the mid-`tHigh`
+  *     sample/arb-check in `bitHighState`).
   *
-  * Result: 9 states, every spec-required dwell (`tHdSta`, `tSuSta`,
-  * `tSuSto`, `tBuf`, `tSuDat`, plus `tHigh`/`tLow` for the bit pulse)
-  * is honoured exactly once, and any future maintainer can read the
-  * states top-to-bottom as a sequence of (edge, dwell) pairs.
+  * Result: 9 states, every spec-required dwell (`tHdSta`, `tSuSta`, `tSuSto`,
+  * `tBuf`, `tSuDat`, plus `tHigh`/`tLow` for the bit pulse) is honoured exactly
+  * once, and any future maintainer can read the states top-to-bottom as a
+  * sequence of (edge, dwell) pairs.
   *
   * ==Registered drivers==
-  * SCL and SDA are driven from `Reg(Bool())` regs (`sclDrive`,
-  * `sdaDrive`) rather than per-state combinational assignments. This
-  * matters because consecutive states often need to *hold* the
-  * previous state's drive value (e.g., after a Start, SDA stays low
-  * while SCL transitions). Combinational drives would force every
-  * state to re-assert every line every cycle; the registered pattern
-  * lets each state touch only the lines it changes.
+  * SCL and SDA are driven from `Reg(Bool())` regs (`sclDrive`, `sdaDrive`)
+  * rather than per-state combinational assignments. This matters because
+  * consecutive states often need to *hold* the previous state's drive value
+  * (e.g., after a Start, SDA stays low while SCL transitions). Combinational
+  * drives would force every state to re-assert every line every cycle; the
+  * registered pattern lets each state touch only the lines it changes.
   *
   * ==Clock stretching==
   * When `cfg.useClockStretching` is `true`, `bitHighState` and
-  * `stopSclRiseState` gate their countdown on `io.bus.scl.read`. A
-  * target may pull SCL low at any time after we release it — the
-  * counter pauses until the target lets go. The gating is a
-  * Scala-time `if`, so the SCL sense path and gating logic disappear
-  * entirely from the synthesised design when stretching is disabled.
+  * `stopSclRiseState` gate their countdown on `io.bus.scl.read`. A target may
+  * pull SCL low at any time after we release it — the counter pauses until the
+  * target lets go. The gating is a Scala-time `if`, so the SCL sense path and
+  * gating logic disappear entirely from the synthesised design when stretching
+  * is disabled.
   *
   * ==Arbitration==
-  * During `WriteBit` of a `1` (released SDA), if `bus.sda.read` reads
-  * back as `0`, another master is winning the bus. We immediately
-  * release both lines, set `arbLost`, and return to idle. `arbLost`
-  * is sticky until the next accepted command. This is the
-  * spec-compliant behaviour and makes the controller safe to use on
-  * a multi-master segment.
+  * During `WriteBit` of a `1` (released SDA), if `bus.sda.read` reads back as
+  * `0`, another master is winning the bus. We immediately release both lines,
+  * set `arbLost`, and return to idle. `arbLost` is sticky until the next
+  * accepted command. This is the spec-compliant behaviour and makes the
+  * controller safe to use on a multi-master segment.
   *
   * @param cfg
-  *   Compile-time configuration (clock frequency, bus speed,
-  *   stretching flag). Drives the [[BusTiming]] table.
+  *   Compile-time configuration (clock frequency, bus speed, stretching flag).
+  *   Drives the [[BusTiming]] table.
   */
 object BitCmd extends SpinalEnum {
   val Idle, Start, RepStart, Stop, WriteBit, ReadBit = newElement()

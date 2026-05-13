@@ -25,26 +25,24 @@ import spinal.core.sim._
   *      exactly how a real UART RX recovers data, so this is the canonical
   *      correctness test. The mix of patterns catches: init-bleed bugs (0x00,
   *      0xFF), LSB/MSB swaps (0x80, 0x01), off-by-one shifts (0xAA, 0x55), and
-  *      a generic mix (0xAD).
-  *   2. **`loadReg` pulse count.** Exactly one `loadReg` pulse per frame, fired
-  *      the cycle the FSM accepts.
-  *   3. **`shiftReg` pulse count.** Exactly `dataBits - 1` `shiftReg` pulses
+  *      a generic mix (0xAD). 2. **`loadReg` pulse count.** Exactly one
+  *      `loadReg` pulse per frame, fired the cycle the FSM accepts. 3.
+  *      **`shiftReg` pulse count.** Exactly `dataBits - 1` `shiftReg` pulses
   *      per frame — the FSM suppresses the dangling shift on the final data
-  *      tick (see TxFsm.scala for why).
-  *   4. **Back-to-back frames.** Holding "start" high across multiple frames
-  *      must work: the FSM should consume `start` once per Idle visit and
-  *      immediately launch the next frame. This is the test that would catch a
-  *      regression to the old `io.start.rise()` behaviour.
-  *   5. **Stop-bit width.** With `cfg.stopBits = 1`, the line must be high for
-  *      `ticksPerBit` cycles after the last data bit (modulo the 1-cycle txReg
-  *      pipeline at each boundary, which mid-bit sampling tolerates by
-  *      construction).
-  *   6. **Two stop bits.** A second elaboration with `cfg.stopBits = 2` runs
-  *      one frame and confirms two stop-bit periods of high line.
-  *   7. **Parity (when enabled).** The expected-frame helper inserts the parity
-  *      bit between the data bits and the stop bit(s), computed as `xor(data)`
-  *      for Even and `xor(data) ^ 1` for Odd. The mid-bit sampler walks through
-  *      it the same way it walks any other bit.
+  *      tick (see TxFsm.scala for why). 4. **Back-to-back frames.** Holding
+  *      "start" high across multiple frames must work: the FSM should consume
+  *      `start` once per Idle visit and immediately launch the next frame. This
+  *      is the test that would catch a regression to the old `io.start.rise()`
+  *      behaviour. 5. **Stop-bit width.** With `cfg.stopBits = 1`, the line
+  *      must be high for `ticksPerBit` cycles after the last data bit (modulo
+  *      the 1-cycle txReg pipeline at each boundary, which mid-bit sampling
+  *      tolerates by construction). 6. **Two stop bits.** A second elaboration
+  *      with `cfg.stopBits = 2` runs one frame and confirms two stop-bit
+  *      periods of high line. 7. **Parity (when enabled).** The expected-frame
+  *      helper inserts the parity bit between the data bits and the stop
+  *      bit(s), computed as `xor(data)` for Even and `xor(data) ^ 1` for Odd.
+  *      The mid-bit sampler walks through it the same way it walks any other
+  *      bit.
   *
   * Parity is implemented in [[TxFsm]] as an FSM-local accumulator (see the
   * "Parity" section in TxFsm's top-of-file comment), so all parity-enabled
@@ -176,10 +174,10 @@ object TxFsmSim {
           dut.io.start #= false
         }
 
-        /** Sample `io.txBit` at the middle of each of the
-          * `1 + dataBits + parityBits + stopBits` bit periods of a frame.
-          * Caller must have just launched a frame; this routine returns once
-          * sampling is done but does NOT wait for `busy` to drop.
+        /** Sample `io.txBit` at the middle of each of the `1 + dataBits +
+          * parityBits + stopBits` bit periods of a frame. Caller must have just
+          * launched a frame; this routine returns once sampling is done but
+          * does NOT wait for `busy` to drop.
           */
         def sampleFrameMidBit(): Seq[Boolean] = {
           // We're somewhere in the first cycle or two of startState.
@@ -201,8 +199,8 @@ object TxFsmSim {
           out.toSeq
         }
 
-        /** Build the expected mid-bit sequence for `byte`:
-          * `[0, d0, d1, ..., d{N-1}, parity?, 1, 1, ...]`.
+        /** Build the expected mid-bit sequence for `byte`: `[0, d0, d1, ...,
+          * d{N-1}, parity?, 1, 1, ...]`.
           *
           * Parity bit is `xor(data bits)` for Even and `~xor(data bits)` for
           * Odd, so that the total count of 1s in (data + parity) is even or odd

@@ -5,57 +5,52 @@ import spinal.core.sim._
 
 /** Standalone sim for [[RxFsm]].
   *
-  * The DUT is just the FSM (which itself instantiates [[RxShiftReg]]); to
-  * stand it up we drive two things from sim threads:
+  * The DUT is just the FSM (which itself instantiates [[RxShiftReg]]); to stand
+  * it up we drive two things from sim threads:
   *
   *   - A **free-running tick fork** that pulses `io.tick` once every
-  *     `ticksPerOversample` system clocks regardless of FSM state. RX is
-  *     unlike TX in this regard — the BaudGenerator is NOT gated by
-  *     `busy`, because the half-bit verify after a start-bit edge needs
-  *     ticks immediately.
-  *   - A **UART line driver** (`sendFrame`) that walks `io.rx` through a
-  *     start bit, `dataBits` data bits LSB-first, an optional parity bit,
-  *     and `stopBits` stop bits, holding each level for one full bit
-  *     period (`oversample × ticksPerOversample` system clocks).
+  *     `ticksPerOversample` system clocks regardless of FSM state. RX is unlike
+  *     TX in this regard — the BaudGenerator is NOT gated by `busy`, because
+  *     the half-bit verify after a start-bit edge needs ticks immediately.
+  *   - A **UART line driver** (`sendFrame`) that walks `io.rx` through a start
+  *     bit, `dataBits` data bits LSB-first, an optional parity bit, and
+  *     `stopBits` stop bits, holding each level for one full bit period
+  *     (`oversample × ticksPerOversample` system clocks).
   *
-  * The "is the byte correct" check is done by reading the Stream payload
-  * after the FSM raises `valid`. The FSM doesn't expose intermediate
-  * shift-register state, so we don't try to peek at it — we drive a known
-  * byte on the line, wait for `valid`, fire the handshake, and compare.
+  * The "is the byte correct" check is done by reading the Stream payload after
+  * the FSM raises `valid`. The FSM doesn't expose intermediate shift-register
+  * state, so we don't try to peek at it — we drive a known byte on the line,
+  * wait for `valid`, fire the handshake, and compare.
   *
   * What we verify
-  *   1. **Post-reset idle.** No `valid`, no error flags, `busy` low.
-  *   2. **Byte sweep.** For each pattern in a chosen set, drive a full
-  *      frame and assert that the consumer sees the expected payload with
-  *      `valid` and no error flags. Patterns chosen for shift-direction
-  *      coverage: 0x00, 0xFF (init bleeds), 0xAA, 0x55 (alternating),
-  *      0x80, 0x01 (LSB / MSB extremes), 0xAD (generic mix).
-  *   3. **Start-bit glitch rejection.** Drive a 1-cycle low pulse on
-  *      `io.rx` while otherwise idle. The FSM must NOT raise `valid` and
-  *      must return to `busy = false` without producing a frame.
-  *   4. **Framing error.** Send a frame with the stop bit forced low.
-  *      Expect `framingError` high in the cycle the FSM returns to idle,
-  *      and NO `valid` for that frame.
-  *   5. **Parity error.** Send a frame with a deliberately corrupted
-  *      parity bit. Expect `parityError` and NO `valid`.
-  *   6. **Parity OK.** Send a normal Even / Odd frame and expect NO
-  *      parityError and a clean `valid`.
-  *   7. **Back-to-back frames.** Two frames with the consumer firing
-  *      between them — both bytes received, no overrun, no errors.
-  *   8. **Overrun.** Two frames with `ready` held LOW between them.
-  *      Expect `overrun` to fire on the second frame and `valid` to
-  *      stay high.
+  *   1. **Post-reset idle.** No `valid`, no error flags, `busy` low. 2. **Byte
+  *      sweep.** For each pattern in a chosen set, drive a full frame and
+  *      assert that the consumer sees the expected payload with `valid` and no
+  *      error flags. Patterns chosen for shift-direction coverage: 0x00, 0xFF
+  *      (init bleeds), 0xAA, 0x55 (alternating), 0x80, 0x01 (LSB / MSB
+  *      extremes), 0xAD (generic mix). 3. **Start-bit glitch rejection.** Drive
+  *      a 1-cycle low pulse on `io.rx` while otherwise idle. The FSM must NOT
+  *      raise `valid` and must return to `busy = false` without producing a
+  *      frame. 4. **Framing error.** Send a frame with the stop bit forced low.
+  *      Expect `framingError` high in the cycle the FSM returns to idle, and NO
+  *      `valid` for that frame. 5. **Parity error.** Send a frame with a
+  *      deliberately corrupted parity bit. Expect `parityError` and NO `valid`.
+  *      6. **Parity OK.** Send a normal Even / Odd frame and expect NO
+  *         parityError and a clean `valid`. 7. **Back-to-back frames.** Two
+  *         frames with the consumer firing between them — both bytes received,
+  *         no overrun, no errors. 8. **Overrun.** Two frames with `ready` held
+  *         LOW between them. Expect `overrun` to fire on the second frame and
+  *         `valid` to stay high.
   *
-  * The whole suite runs against a sweep matrix:
-  *   8N1, 8N2, 8E1, 8O1, 5N1
+  * The whole suite runs against a sweep matrix: 8N1, 8N2, 8E1, 8O1, 5N1
   * (smaller width axis to exercise the parametrised counters).
   *
   * Run: `sbt "runMain uart.RxFsmSim"`
   */
 object RxFsmSim {
 
-  /** One pass against a freshly-elaborated [[RxFsm]] DUT. Pulled out of
-    * `main` so the same body runs across the config sweep.
+  /** One pass against a freshly-elaborated [[RxFsm]] DUT. Pulled out of `main`
+    * so the same body runs across the config sweep.
     */
   def runFsmTest(cfg: UartConfig, patterns: Seq[Int]): Unit = {
 
@@ -105,15 +100,15 @@ object RxFsmSim {
         // Helpers
         // ------------------------------------------------------------------
 
-        /** Build the wire-level bit sequence for a frame:
-          * `[start=0, d0..d{N-1}, parity?, 1×stopBits]`.
+        /** Build the wire-level bit sequence for a frame: `[start=0,
+          * d0..d{N-1}, parity?, 1×stopBits]`.
           *
           * @param byte
           *   data byte; only the low `cfg.dataBits` bits are used.
           * @param parityOverride
-          *   if `Some(b)`, force the parity bit to that value (useful
-          *   for parity-error tests). If `None`, compute the correct
-          *   parity from the data bits + parity scheme.
+          *   if `Some(b)`, force the parity bit to that value (useful for
+          *   parity-error tests). If `None`, compute the correct parity from
+          *   the data bits + parity scheme.
           * @param stopOverride
           *   if `Some(seq)`, use that as the stop-bit sequence (for
           *   framing-error tests). Otherwise emit `cfg.stopBits` ones.
@@ -138,9 +133,8 @@ object RxFsmSim {
           Seq(false) ++ dataSeq ++ paritySeq ++ stopSeq
         }
 
-        /** Drive a sequence of bits onto `io.rx`, holding each value
-          * for one full bit period (`oversample × ticksPerOversample`
-          * clocks).
+        /** Drive a sequence of bits onto `io.rx`, holding each value for one
+          * full bit period (`oversample × ticksPerOversample` clocks).
           *
           * Does NOT raise `io.payload.ready` — the caller manages the
           * handshake.
@@ -152,17 +146,16 @@ object RxFsmSim {
           }
         }
 
-        /** Hold the line idle (high) for several bit periods so the
-          * FSM's stop-state cleanup observably completes before the
-          * next stimulus.
+        /** Hold the line idle (high) for several bit periods so the FSM's
+          * stop-state cleanup observably completes before the next stimulus.
           */
         def idleLine(bitsWide: Int = 2): Unit = {
           dut.io.rx #= true
           dut.clockDomain.waitSampling(bitClocks * bitsWide)
         }
 
-        /** Wait up to `maxClocks` clocks for a predicate to become
-          * true. Returns whether it did.
+        /** Wait up to `maxClocks` clocks for a predicate to become true.
+          * Returns whether it did.
           */
         def waitFor(maxClocks: Int)(cond: => Boolean): Boolean = {
           var n = 0
@@ -173,10 +166,9 @@ object RxFsmSim {
           cond
         }
 
-        /** Fire the consumer handshake exactly once on the cycle the
-          * FSM raises `valid`, returning the captured payload (and any
-          * error flags observed on that cycle). Times out after
-          * `maxClocks` clocks.
+        /** Fire the consumer handshake exactly once on the cycle the FSM raises
+          * `valid`, returning the captured payload (and any error flags
+          * observed on that cycle). Times out after `maxClocks` clocks.
           */
         def expectPayload(
             maxClocks: Int = bitClocks * 30
@@ -235,9 +227,18 @@ object RxFsmSim {
             (payload & mask) == (p.toLong & mask),
             f"[$cfgLabel byte-sweep] expected 0x${p & mask.toInt}%X, got 0x${payload & mask}%X"
           )
-          assert(!framing, f"[$cfgLabel byte-sweep] unexpected framingError on 0x$p%X")
-          assert(!parity, f"[$cfgLabel byte-sweep] unexpected parityError on 0x$p%X")
-          assert(!overrun, f"[$cfgLabel byte-sweep] unexpected overrun on 0x$p%X")
+          assert(
+            !framing,
+            f"[$cfgLabel byte-sweep] unexpected framingError on 0x$p%X"
+          )
+          assert(
+            !parity,
+            f"[$cfgLabel byte-sweep] unexpected parityError on 0x$p%X"
+          )
+          assert(
+            !overrun,
+            f"[$cfgLabel byte-sweep] unexpected overrun on 0x$p%X"
+          )
           // Wait for FSM to fully return to idle before the next frame.
           waitFor(bitClocks * 4)(!dut.io.busy.toBoolean)
           dut.clockDomain.waitSampling(bitClocks)
@@ -283,7 +284,10 @@ object RxFsmSim {
         val framingByte = patterns.head
         val framingDrv = fork {
           driveBits(
-            frameBits(framingByte, stopOverride = Some(Seq.fill(cfg.stopBits)(false)))
+            frameBits(
+              framingByte,
+              stopOverride = Some(Seq.fill(cfg.stopBits)(false))
+            )
           )
           idleLine()
         }
@@ -303,8 +307,14 @@ object RxFsmSim {
           if (dut.io.payload.valid.toBoolean) sawValid = true
           f += 1
         }
-        assert(sawFraming, s"[$cfgLabel] framing error: expected framingError pulse")
-        assert(!sawValid, s"[$cfgLabel] framing error: valid raised despite framing failure")
+        assert(
+          sawFraming,
+          s"[$cfgLabel] framing error: expected framingError pulse"
+        )
+        assert(
+          !sawValid,
+          s"[$cfgLabel] framing error: valid raised despite framing failure"
+        )
         // MUST join before idleLine — see comment above.
         framingDrv.join()
 
@@ -320,7 +330,10 @@ object RxFsmSim {
           (rec & mask) == (patterns.head.toLong & mask),
           s"[$cfgLabel] recovery after framing error: bad payload"
         )
-        assert(!fE && !pE && !oE, s"[$cfgLabel] recovery after framing error: spurious flags")
+        assert(
+          !fE && !pE && !oE,
+          s"[$cfgLabel] recovery after framing error: spurious flags"
+        )
         idleLine()
 
         // ------------------------------------------------------------------
@@ -356,8 +369,14 @@ object RxFsmSim {
             if (dut.io.payload.valid.toBoolean) sawValid2 = true
             p2 += 1
           }
-          assert(sawParity, s"[$cfgLabel] parity error: expected parityError pulse")
-          assert(!sawValid2, s"[$cfgLabel] parity error: valid raised despite parity failure")
+          assert(
+            sawParity,
+            s"[$cfgLabel] parity error: expected parityError pulse"
+          )
+          assert(
+            !sawValid2,
+            s"[$cfgLabel] parity error: valid raised despite parity failure"
+          )
           // MUST join before idleLine — driver fork still owns io.rx.
           parityDrv.join()
           idleLine(4)
@@ -372,7 +391,8 @@ object RxFsmSim {
         // (7) Back-to-back frames with consumer firing.
         // ------------------------------------------------------------------
         idleLine(2)
-        val backToBackBytes = if (cfg.dataBits >= 5) Seq(0x12, 0x14, 0x16) else Seq(0x12)
+        val backToBackBytes =
+          if (cfg.dataBits >= 5) Seq(0x12, 0x14, 0x16) else Seq(0x12)
         // Driver thread: send all frames consecutively, only an
         // inter-frame idle of 1 stop bit's worth (no extra slack).
         fork {
@@ -387,7 +407,10 @@ object RxFsmSim {
             (payload & mask) == (b.toLong & mask),
             f"[$cfgLabel back-to-back] expected 0x$b%X, got 0x${payload & mask}%X"
           )
-          assert(!fE && !pE && !oE, f"[$cfgLabel back-to-back] spurious error flags on 0x$b%X")
+          assert(
+            !fE && !pE && !oE,
+            f"[$cfgLabel back-to-back] spurious error flags on 0x$b%X"
+          )
         }
         // Wait for FSM to settle.
         waitFor(bitClocks * 4)(!dut.io.busy.toBoolean)

@@ -7,22 +7,20 @@ import spinal.core.sim._
   *
   * What we verify
   *   1. After loading a byte, the bit sequence on `io.bit` over the next 8
-  *      shift cycles matches the byte's LSB-first bit order.
-  *   2. Multiple test patterns: all-zeros, all-ones, alternating bits,
-  *      single-bit walks, and a generic mixed pattern. Each catches a different
-  *      class of bug:
+  *      shift cycles matches the byte's LSB-first bit order. 2. Multiple test
+  *      patterns: all-zeros, all-ones, alternating bits, single-bit walks, and
+  *      a generic mixed pattern. Each catches a different class of bug:
   *      - `0x00` / `0xFF`: catches "init value bleeds through" bugs (e.g.
   *        forgetting to actually load).
   *      - `0xAA` / `0x55`: catches off-by-one shift bugs.
   *      - `0x80` / `0x01`: catches LSB/MSB swap bugs that symmetric patterns
   *        (`0xAA`) would mask.
-  *      - `0xAD`: a generic mix, no special structure.
-  *   3. Load-priority test: when `load=1` and `shift=1` fire on the same cycle,
-  *      the freshly loaded LSB must appear next cycle — not the
-  *      shifted-then-loaded value, not the loaded-then-shifted value, just the
-  *      load.
-  *   4. Hold test: with both `load` and `shift` low, the register content (and
-  *      `io.bit`) must not change.
+  *      - `0xAD`: a generic mix, no special structure. 3. Load-priority test:
+  *        when `load=1` and `shift=1` fire on the same cycle, the freshly
+  *        loaded LSB must appear next cycle — not the shifted-then-loaded
+  *        value, not the loaded-then-shifted value, just the load. 4. Hold
+  *        test: with both `load` and `shift` low, the register content (and
+  *        `io.bit`) must not change.
   *
   * Timing model `io.bit` is combinational off a register. After we drive
   * `load=1` and call `waitSampling()`, the rising edge captures `data` into

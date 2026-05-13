@@ -7,26 +7,25 @@ import spinal.core.sim._
   *
   * What we verify
   *   1. The LED stays low until the first rising edge of the (synchronised)
-  *      `pressed` signal.
-  *   2. Every press of `io.btn` (line driven LOW) toggles the LED — but only
-  *      after `BufferCC`'s 2-cycle synchroniser delay has elapsed.
-  *   3. *Holding* the button does not toggle the LED again. Only the
-  *      transition from "not pressed" to "pressed" counts.
-  *   4. Releases (line returning HIGH) do not toggle the LED.
+  *      `pressed` signal. 2. Every press of `io.btn` (line driven LOW) toggles
+  *      the LED — but only after `BufferCC`'s 2-cycle synchroniser delay has
+  *      elapsed. 3. *Holding* the button does not toggle the LED again. Only
+  *      the transition from "not pressed" to "pressed" counts. 4. Releases
+  *      (line returning HIGH) do not toggle the LED.
   *
   * Notes on timing
   *   - The toplevel exposes `io.clk` as an ordinary input rather than the
   *     implicit clock domain, and uses BOOT reset on the explicit `cd`.
-  *     `cd.forkStimulus` doesn't reliably propagate the BOOT init values
-  *     in Verilator for this configuration, so we drive `io.clk` by hand
-  *     (the same pattern `BlinkySim` uses).
+  *     `cd.forkStimulus` doesn't reliably propagate the BOOT init values in
+  *     Verilator for this configuration, so we drive `io.clk` by hand (the same
+  *     pattern `BlinkySim` uses).
   *   - `BufferCC` defaults to a 2-flop synchroniser, so a transition on
-  *     `io.btn` shows up on `pressedSync` two cycles later. The edge
-  *     detector then needs one more cycle to register the previous-vs-
-  *     current diff. We tick `>= 4` times per press to be safe.
+  *     `io.btn` shows up on `pressedSync` two cycles later. The edge detector
+  *     then needs one more cycle to register the previous-vs- current diff. We
+  *     tick `>= 4` times per press to be safe.
   *   - We deliberately do *not* model bounce here — `ButtonTop` doesn't
-  *     debounce, so a bouncy stimulus would (correctly) toggle the LED
-  *     several times per "press". See `ButtonDebouncer/` for that case.
+  *     debounce, so a bouncy stimulus would (correctly) toggle the LED several
+  *     times per "press". See `ButtonDebouncer/` for that case.
   *
   * Run: `sbt "runMain button.ButtonTopSim"` (or `make sim`).
   */
@@ -98,9 +97,9 @@ object ButtonTopSim {
   }
 
   /** One full press-and-release cycle. Mirrors the board electrically: io.btn
-    * is pulled HIGH at idle and shorts to GND when pressed. Drive LOW to
-    * press, HIGH to release; tick long enough between transitions for the
-    * BufferCC synchroniser + edge detector to register.
+    * is pulled HIGH at idle and shorts to GND when pressed. Drive LOW to press,
+    * HIGH to release; tick long enough between transitions for the BufferCC
+    * synchroniser + edge detector to register.
     */
   private def press(dut: ButtonTop, tick: Int => Unit): Unit = {
     dut.io.btn #= false

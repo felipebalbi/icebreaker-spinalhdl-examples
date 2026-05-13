@@ -8,17 +8,17 @@ import spinal.core._
   * The Lattice iCE40 used on the iCEBreaker has no global asynchronous reset
   * pin available to user logic. We therefore use Spinal's `BOOT` reset kind so
   * registers come up cleared from the bitstream's initial state and we don't
-  * need to wire a reset net of our own. See [[BlinkyWithReset]] for the
-  * variant that exposes an explicit asynchronous, active-low reset.
+  * need to wire a reset net of our own. See [[BlinkyWithReset]] for the variant
+  * that exposes an explicit asynchronous, active-low reset.
   *
   * The toplevel exposes `io.clk` as a plain `Bool` (rather than relying on
   * Spinal's implicit clock) so the generated Verilog port is named `io_clk`,
   * matching `icebreaker.pcf`.
   *
-  * @param counterWidth Width of the divider counter. Synthesis builds use the
-  *                     default of 25 bits which gives roughly a 1.4 s period
-  *                     at 12 MHz; simulation can override this to keep tests
-  *                     fast.
+  * @param counterWidth
+  *   Width of the divider counter. Synthesis builds use the default of 25 bits
+  *   which gives roughly a 1.4 s period at 12 MHz; simulation can override this
+  *   to keep tests fast.
   */
 case class Blinky(counterWidth: Int = 25) extends Component {
   val io = new Bundle {
