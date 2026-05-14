@@ -369,12 +369,88 @@ object I2cByteControllerSim {
     }
   }
 
-  /** AddrWrite + WriteData(reg) + RepStart + AddrRead + ReadData(NAK) + Stop.
-    * Verifies a full register-read round trip, including the direction flip via
-    * RepStart.
+  /** AddrWrite + WriteData(reg) + RepStart + ReadData(NAK) + Stop. Verifies a
+    * full register-read round trip, including the direction flip via RepStart.
     */
   private def caseRepeatedStartReadAfterWrite(): Unit = {
-    println("PENDING: caseRepeatedStartReadAfterWrite")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig(regFileInit =
+      Map(0x03 -> 0xfb)
+    ) // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-read-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(
+        !r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
+
+      // WriteData(0x03).
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0x03)
+      val r2 = expectRsp(rig)
+      assert(
+        r2.status == ByteRspStatus.Ok,
+        s"addr: status=${r2.status}, expected Ok"
+      )
+      assert(
+        !r2.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
+
+      // RepStart(0x50 << 1 | 1). LSB is explicit.
+      issueCmd(rig, ByteCmdKind.RepStart, data = 0x50 << 1 | 1)
+      val r3 = expectRsp(rig)
+      assert(
+        r3.status == ByteRspStatus.Ok,
+        s"addr: status=${r3.status}, expected Ok"
+      )
+      assert(
+        !r3.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
+
+      // ReadData(NAK) -- single-byte read, so we tell the controller
+      // to send NAK on the master ACK slot to signal end-of-read.
+      issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
+      val r4 = expectRsp(rig)
+      assert(
+        r4.status == ByteRspStatus.Ok,
+        s"data: status=${r4.status}, expected Ok"
+      )
+      // ackIn is meaningless on a ReadData rsp (the controller drove
+      // ACK itself); the load-bearing check is `data` -- the byte we
+      // received from the slave. Default BehaviouralI2cTarget sends
+      // 0xA5 (initial value of `readByte`).
+      assert(
+        r4.data == 0xfb,
+        s"data: got 0x${r4.data.toString(16)}, expected 0xfb"
+      )
+
+      // Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r5 = expectRsp(rig)
+      assert(
+        r5.status == ByteRspStatus.Ok,
+        s"stop: status=${r5.status}, expected Ok"
+      )
+
+      // Let the bus settle, then check it's released.
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+
+      println("Ok: caseRepeatedStartReadAfterWrite")
+    }
   }
 
   /** Target NAKs the address byte. Assert `ackIn = 1`, `mustTerminate` is set,
@@ -447,6 +523,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 4 / 12 implemented")
+    println("Done: 5 / 12 implemented")
   }
 }

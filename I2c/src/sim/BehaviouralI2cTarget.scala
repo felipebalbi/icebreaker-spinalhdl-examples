@@ -93,11 +93,11 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig)
   val byteIdx = Reg(UInt(8 bits)) init (0)
 
   val regAddr = Reg(UInt(8 bits)) init (0)
-  val regFile = Vec(Reg(Bits(8 bits)), 256)
-
-  for ((el, i) <- regFile.zipWithIndex) {
-    el := tCfg.regFileInit.getOrElse(i, 0x55)
+  val regFile = Vec.tabulate(256) { i =>
+    val initVal = tCfg.regFileInit.getOrElse(i, 0x55)
+    Reg(Bits(8 bits)) init (B(initVal, 8 bits))
   }
+  regFile.foreach(r => r := r)
 
   val bitCount = Reg(UInt(4 bits)) init (0)
   val inReadAck = Reg(Bool()) init (False)
@@ -192,6 +192,11 @@ class BehaviouralI2cTarget(cfg: I2cConfig, tCfg: BehaviouralI2cTargetConfig)
             sdaDrive := True
             inAckSlot := False
             bitCount := 0
+
+            when(byteIdx === 0) {
+              regAddr := shiftReg.asUInt
+            }
+
             byteIdx := byteIdx + 1
           }
         }
