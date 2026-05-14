@@ -505,6 +505,11 @@ object I2cByteControllerSim {
           r4.status == ByteRspStatus.Ok,
           s"stop: status=${r4.status}, expected Ok"
         )
+
+        // Let the bus settle, then check it's released.
+        rig.clockDomain.waitSampling(20)
+        assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+        assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
       }
 
       println("Ok: caseAddressNak")
@@ -540,7 +545,38 @@ object I2cByteControllerSim {
     * must emit `status = InvalidSeq` and leave the FSM in idle.
     */
   private def caseInvalidSeqFromIdle(): Unit = {
-    println("PENDING: caseInvalidSeqFromIdle")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("invalid-seq-idle") {
+      rig =>
+        rig.clockDomain.forkStimulus(period = 10)
+        rig.io.cmd.valid #= false
+        rig.io.rsp.ready #= false
+        rig.clockDomain.waitSampling(5)
+
+        for (
+          kind <- Seq(
+            ByteCmdKind.WriteData,
+            ByteCmdKind.ReadData,
+            ByteCmdKind.RepStart,
+            ByteCmdKind.Stop
+          )
+        ) {
+          issueCmd(rig, kind, data = 0xd0)
+          val r1 = expectRsp(rig)
+          assert(
+            r1.status == ByteRspStatus.InvalidSeq,
+            s"$kind: status=${r1.status}, expected InvalidSeq"
+          )
+
+          // Let the bus settle, then check it's released.
+          rig.clockDomain.waitSampling(20)
+          assert(rig.sclWriteOut.toBoolean, s"SCL not released after $kind")
+          assert(rig.sdaWriteOut.toBoolean, s"SDA not released after $kind")
+        }
+
+        println("Ok: caseInvalidSeqFromIdle")
+    }
   }
 
   /** While `mustTerminate` is latched, every non-terminator command (AddrWrite,
@@ -548,7 +584,96 @@ object I2cByteControllerSim {
     * / RepStart should clear the wedged state.
     */
   private def caseInvalidSeqWedged(): Unit = {
-    println("PENDING: caseInvalidSeqWedged")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig(ackPattern =
+      Seq(false)
+    ) // address 0x50, always NAK
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("invalid-seq-wedged") {
+      rig =>
+        rig.clockDomain.forkStimulus(period = 10)
+        rig.io.cmd.valid #= false
+        rig.io.rsp.ready #= false
+        rig.clockDomain.waitSampling(5)
+
+        for (recovery <- Seq(ByteCmdKind.Stop, ByteCmdKind.RepStart)) {
+          // Addr the target, should succeed
+          issueCmd(rig, ByteCmdKind.AddrWrite, 0x50 << 1)
+          val r1 = expectRsp(rig)
+          assert(
+            r1.status == ByteRspStatus.Ok,
+            s"addr: status=${r1.status}, expected Ok"
+          )
+
+          // WriteData, should NAK
+          issueCmd(rig, ByteCmdKind.WriteData, data = 0xfb)
+          val r2 = expectRsp(rig)
+          assert(
+            r2.status == ByteRspStatus.Ok,
+            s"data: status=${r2.status}, expected Ok"
+          )
+          assert(
+            r2.ackIn,
+            s"data: target ACK'd (ackIn=false); expected NAK (true)"
+          )
+
+          for (
+            kind <- Seq(
+              ByteCmdKind.AddrWrite,
+              ByteCmdKind.AddrRead,
+              ByteCmdKind.WriteData,
+              ByteCmdKind.ReadData
+            )
+          ) {
+            issueCmd(rig, kind, data = 0x50 << 1)
+            val r3 = expectRsp(rig)
+            assert(
+              r3.status == ByteRspStatus.InvalidSeq,
+              s"wedge-$kind: status=${r3.status}, expected InvalidSeq"
+            )
+          }
+
+          // Clear the wedge. Aim RepStart at read direction (lsb=1) so
+          // the follow-up ReadData below proves the controller can
+          // resume normal operation. Stop ignores `data`.
+          issueCmd(rig, recovery, data = 0x50 << 1 | 1)
+          val r4 = expectRsp(rig)
+          assert(
+            r4.status == ByteRspStatus.Ok,
+            s"recovery-${recovery}: status=${r4.status}, expected Ok"
+          )
+
+          // For RepStart, prove the wedge is *actually* cleared (not
+          // just that RepStart returned Ok) by issuing a follow-up
+          // ReadData. ackOut=true sends NAK to end the burst. The bus
+          // ends up in the same between-bytes state RepStart left it
+          // in (SCL low, SDA released), so the assertions below still
+          // hold.
+          if (recovery == ByteCmdKind.RepStart) {
+            issueCmd(rig, ByteCmdKind.ReadData, ackOut = true)
+            val r5 = expectRsp(rig)
+            assert(
+              r5.status == ByteRspStatus.Ok,
+              s"post-recovery read: status=${r5.status}, expected Ok"
+            )
+
+            // End with a stop command, such that both SCL and SDA are
+            // released in the end.
+            issueCmd(rig, ByteCmdKind.Stop)
+            val r6 = expectRsp(rig)
+            assert(
+              r6.status == ByteRspStatus.Ok,
+              s"stop: status=${r6.status}, expected Ok"
+            )
+          }
+
+          // Let the bus settle, then check it's in the expected state.
+          rig.clockDomain.waitSampling(20)
+          assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+          assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+        }
+
+        println("Ok: caseInvalidSeqWedged")
+    }
   }
 
   /** Direction mismatch within a transaction:
@@ -574,6 +699,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 6 / 12 implemented")
+    println("Done: 8 / 12 implemented")
   }
 }
