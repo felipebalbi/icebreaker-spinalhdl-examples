@@ -69,6 +69,11 @@ object I2cByteControllerSim {
     val io = new Bundle {
       val cmd = slave Stream ByteCmd()
       val rsp = master Stream ByteRsp()
+      // Third-master drivers for arb-loss tests. Default-released
+      // (poke `true`) for every other test; pulled low to simulate a
+      // competing master on the wired-AND bus.
+      val competitorScl = in Bool ()
+      val competitorSda = in Bool ()
     }
     val dut = I2cByteController(cfg)
     val target = new BehaviouralI2cTarget(cfg, tCfg)
@@ -78,6 +83,8 @@ object I2cByteControllerSim {
     io.rsp << dut.io.rsp
     dut.io.bus <> bus.io.a
     target.io.bus <> bus.io.b
+    bus.io.c.scl.write := io.competitorScl
+    bus.io.c.sda.write := io.competitorSda
 
     val sclWriteOut = dut.io.bus.scl.write.simPublic()
     val sdaWriteOut = dut.io.bus.sda.write.simPublic()
@@ -151,6 +158,8 @@ object I2cByteControllerSim {
         rig.clockDomain.forkStimulus(period = 10)
         rig.io.cmd.valid #= false
         rig.io.rsp.ready #= false
+        rig.io.competitorScl #= true
+        rig.io.competitorSda #= true
         rig.clockDomain.waitSampling(5)
 
         // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
@@ -204,6 +213,8 @@ object I2cByteControllerSim {
       rig.clockDomain.forkStimulus(period = 10)
       rig.io.cmd.valid #= false
       rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
       rig.clockDomain.waitSampling(5)
 
       // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
@@ -263,6 +274,8 @@ object I2cByteControllerSim {
         rig.clockDomain.forkStimulus(period = 10)
         rig.io.cmd.valid #= false
         rig.io.rsp.ready #= false
+        rig.io.competitorScl #= true
+        rig.io.competitorSda #= true
         rig.clockDomain.waitSampling(5)
 
         // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
@@ -319,6 +332,8 @@ object I2cByteControllerSim {
       rig.clockDomain.forkStimulus(period = 10)
       rig.io.cmd.valid #= false
       rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
       rig.clockDomain.waitSampling(5)
 
       // AddrRead(0x50<<1). Controller forces lsb = 1 anyway.
@@ -381,6 +396,8 @@ object I2cByteControllerSim {
       rig.clockDomain.forkStimulus(period = 10)
       rig.io.cmd.valid #= false
       rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
       rig.clockDomain.waitSampling(5)
 
       // AddrWrite(0x50<<1). Controller forces lsb = 0 anyway.
@@ -463,6 +480,8 @@ object I2cByteControllerSim {
       rig.clockDomain.forkStimulus(period = 10)
       rig.io.cmd.valid #= false
       rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
       rig.clockDomain.waitSampling(5)
 
       // Start with a successful Write.
@@ -519,26 +538,252 @@ object I2cByteControllerSim {
   /** Target NAKs the second data byte mid-burst. Assert the rsp carries `ackIn
     * \= 1`, `mustTerminate` latches, and only Stop / RepStart are accepted
     * next.
+    *
+    * Differs from caseInvalidSeqWedged: that one wedges on the *first* data
+    * byte (always-NAK target). This one ACKs the address and the first data
+    * byte, NAKs the second — the more realistic SMBus failure mode.
     */
   private def caseDataNak(): Unit = {
-    println("PENDING: caseDataNak")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    // ACK byte 0, NAK byte 1 (pattern wraps mod 2 but we only write 2 bytes).
+    val tCfg = BehaviouralI2cTargetConfig(ackPattern = Seq(true, false))
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("data-nak") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
+      rig.clockDomain.waitSampling(5)
+
+      // Address phase: target ACKs.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(!r1.ackIn, s"addr: ackIn=true, expected ACK")
+
+      // First data byte: ACK'd.
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xaa)
+      val r2 = expectRsp(rig)
+      assert(
+        r2.status == ByteRspStatus.Ok,
+        s"data0: status=${r2.status}, expected Ok"
+      )
+      assert(!r2.ackIn, s"data0: ackIn=true, expected ACK")
+
+      // Second data byte: NAK'd. Status is still Ok (the byte transferred
+      // cleanly); the NAK shows up via ackIn=true and latches mustTerminate.
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xbb)
+      val r3 = expectRsp(rig)
+      assert(
+        r3.status == ByteRspStatus.Ok,
+        s"data1: status=${r3.status}, expected Ok"
+      )
+      assert(r3.ackIn, s"data1: ackIn=false, expected NAK (ackIn=true)")
+
+      // Wedge proof: any non-terminator now returns InvalidSeq.
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xcc)
+      val r4 = expectRsp(rig)
+      assert(
+        r4.status == ByteRspStatus.InvalidSeq,
+        s"wedged-data: status=${r4.status}, expected InvalidSeq"
+      )
+
+      // Recover with Stop.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r5 = expectRsp(rig)
+      assert(
+        r5.status == ByteRspStatus.Ok,
+        s"stop: status=${r5.status}, expected Ok"
+      )
+
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+
+      println("Ok: caseDataNak")
+    }
   }
 
   /** A second master pulls SDA low during the Start condition. Assert the rsp
     * carries `status = ArbLost` and the FSM returns to idle without driving the
     * bus further.
+    *
+    * The bit controller only flags arb-loss when *releasing* SDA and reading
+    * back 0 (i.e. during a `WriteBit` of 1). The Start edge itself can't
+    * detect arb (both masters pulling low looks identical to solo). So
+    * "during Start" really means during the first 1-bit of the address byte.
+    * Address `0x55` (8-bit form `0xAA = 10101010`) puts a 1 at bit 7, the
+    * very first bit shifted out, so the competitor wins on the first
+    * release.
     */
   private def caseArbLossDuringStart(): Unit = {
-    println("PENDING: caseArbLossDuringStart")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // unused — DUT never reaches addr ACK.
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("arb-loss-start") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
+      rig.clockDomain.waitSampling(5)
+
+      // Competitor wins SDA from the get-go. Holding low across the Start
+      // is benign — Start is "SDA falls while SCL high", and the DUT pulls
+      // SDA itself, so it can't tell anyone else is also pulling. Arb-loss
+      // fires when the DUT later releases SDA on the first 1-bit.
+      rig.io.competitorSda #= false
+
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x55 << 1)
+      val r1 = expectRsp(rig)
+      assert(
+        r1.status == ByteRspStatus.ArbLost,
+        s"addr: status=${r1.status}, expected ArbLost"
+      )
+
+      // Wedge proof: subsequent non-terminator returns InvalidSeq.
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xcc)
+      val r2 = expectRsp(rig)
+      assert(
+        r2.status == ByteRspStatus.InvalidSeq,
+        s"wedged-data: status=${r2.status}, expected InvalidSeq"
+      )
+
+      // Release competitor before recovering — otherwise Stop can't drive
+      // SDA high (the wired-AND would still see low).
+      rig.io.competitorSda #= true
+
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r3 = expectRsp(rig)
+      // Stop's rsp surfaces sticky `arbLostReg`, so status is still ArbLost.
+      // arbLostReg is cleared on Stop.onExit, so the next AddrWrite sees Ok.
+      assert(
+        r3.status == ByteRspStatus.ArbLost,
+        s"stop: status=${r3.status}, expected ArbLost (sticky)"
+      )
+      // Recovery proof: a fresh, uncontested transaction succeeds (i.e. the
+      // controller's wedge cleared). We don't assert on `ackIn` here — the
+      // behavioural target may have been confused by the contention/Stop
+      // sequence; what we care about is that the controller accepts the
+      // new transaction (`status == Ok`) instead of returning InvalidSeq.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r4 = expectRsp(rig)
+      assert(
+        r4.status == ByteRspStatus.Ok,
+        s"recover-addr: status=${r4.status}, expected Ok"
+      )
+
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r5 = expectRsp(rig)
+      assert(
+        r5.status == ByteRspStatus.Ok,
+        s"recover-stop: status=${r5.status}, expected Ok"
+      )
+
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released at end")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released at end")
+
+      println("Ok: caseArbLossDuringStart")
+    }
   }
 
   /** Contention on SDA mid-byte (controller drives 1, second master pulls 0).
     * Assert the controller's `*WaitState` short-circuits to the matching
     * `*RspState` with `status = ArbLost`, and that `arbLost` is reported
     * exactly once.
+    *
+    * Strategy: clean address phase (competitor released), then issue
+    * `WriteData(0xFF)` — every bit is a release, so any moment we pull
+    * competitor SDA low during the data phase forces arb-loss.
     */
   private def caseArbLossMidByte(): Unit = {
-    println("PENDING: caseArbLossMidByte")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig()
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("arb-loss-mid") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.io.competitorScl #= true
+      rig.io.competitorSda #= true
+      rig.clockDomain.waitSampling(5)
+
+      // Clean address phase.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(!r1.ackIn, s"addr: ackIn=true, expected ACK")
+
+      // Fork a thread that pulls competitor SDA low partway through the
+      // data byte. WriteData(0xFF) means the DUT releases SDA on every
+      // bit; the competitor wins as soon as it pulls low.
+      //
+      // Timing: after issueCmd returns the cmd was just consumed. Bit
+      // period at 100 kHz / 12 MHz clk is 120 cycles. Wait ~150 cycles
+      // (about one bit in) before pulling low so we land mid-byte rather
+      // than on bit 7.
+      val arbThread = fork {
+        rig.clockDomain.waitSampling(150)
+        rig.io.competitorSda #= false
+      }
+
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xff)
+      val r2 = expectRsp(rig)
+      arbThread.join()
+      assert(
+        r2.status == ByteRspStatus.ArbLost,
+        s"data: status=${r2.status}, expected ArbLost"
+      )
+
+      // Wedge proof.
+      issueCmd(rig, ByteCmdKind.WriteData, data = 0xcc)
+      val r3 = expectRsp(rig)
+      assert(
+        r3.status == ByteRspStatus.InvalidSeq,
+        s"wedged-data: status=${r3.status}, expected InvalidSeq"
+      )
+
+      // Release competitor and recover.
+      rig.io.competitorSda #= true
+
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r4 = expectRsp(rig)
+      // Stop's rsp surfaces sticky `arbLostReg`. Cleared on Stop.onExit.
+      assert(
+        r4.status == ByteRspStatus.ArbLost,
+        s"stop: status=${r4.status}, expected ArbLost (sticky)"
+      )
+
+      // Recovery proof.
+      // Recovery proof: a fresh, uncontested transaction is accepted by
+      // the controller (`status == Ok`). We don't assert on `ackIn` —
+      // the behavioural target may have been knocked out of sync by the
+      // contention; what matters here is that the controller un-wedged.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r5 = expectRsp(rig)
+      assert(
+        r5.status == ByteRspStatus.Ok,
+        s"recover-addr: status=${r5.status}, expected Ok"
+      )
+
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r6 = expectRsp(rig)
+      assert(
+        r6.status == ByteRspStatus.Ok,
+        s"recover-stop: status=${r6.status}, expected Ok"
+      )
+
+      rig.clockDomain.waitSampling(20)
+      assert(rig.sclWriteOut.toBoolean, "SCL not released at end")
+      assert(rig.sdaWriteOut.toBoolean, "SDA not released at end")
+
+      println("Ok: caseArbLossMidByte")
+    }
   }
 
   /** From idle, every non-Addr* command (WriteData, ReadData, RepStart, Stop)
@@ -552,6 +797,8 @@ object I2cByteControllerSim {
         rig.clockDomain.forkStimulus(period = 10)
         rig.io.cmd.valid #= false
         rig.io.rsp.ready #= false
+        rig.io.competitorScl #= true
+        rig.io.competitorSda #= true
         rig.clockDomain.waitSampling(5)
 
         for (
@@ -593,6 +840,8 @@ object I2cByteControllerSim {
         rig.clockDomain.forkStimulus(period = 10)
         rig.io.cmd.valid #= false
         rig.io.rsp.ready #= false
+        rig.io.competitorScl #= true
+        rig.io.competitorSda #= true
         rig.clockDomain.waitSampling(5)
 
         for (recovery <- Seq(ByteCmdKind.Stop, ByteCmdKind.RepStart)) {
@@ -689,6 +938,8 @@ object I2cByteControllerSim {
         rig.clockDomain.forkStimulus(period = 10)
         rig.io.cmd.valid #= false
         rig.io.rsp.ready #= false
+        rig.io.competitorScl #= true
+        rig.io.competitorSda #= true
         rig.clockDomain.waitSampling(5)
 
         for (
@@ -754,6 +1005,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 9 / 12 implemented")
+    println("Done: 12 / 12 implemented")
   }
 }

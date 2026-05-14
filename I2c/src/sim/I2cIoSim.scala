@@ -20,13 +20,16 @@ class I2cIoBus extends Component {
   val io = new Bundle {
     val a = slave(I2cIo())
     val b = slave(I2cIo())
+    val c = slave(I2cIo())
   }
-  val sclBus = io.a.scl.write & io.b.scl.write
-  val sdaBus = io.a.sda.write & io.b.sda.write
+  val sclBus = io.a.scl.write & io.b.scl.write & io.c.scl.write
+  val sdaBus = io.a.sda.write & io.b.sda.write & io.c.sda.write
   io.a.scl.read := sclBus
   io.b.scl.read := sclBus
+  io.c.scl.read := sclBus
   io.a.sda.read := sdaBus
   io.b.sda.read := sdaBus
+  io.c.sda.read := sdaBus
 }
 
 /** Smoke-test [[I2cIo]] + [[I2cIoBus]].
@@ -69,6 +72,8 @@ object I2cIoSim {
         dut.io.a.sda.write #= aSda
         dut.io.b.scl.write #= bScl
         dut.io.b.sda.write #= bSda
+        dut.io.c.scl.write #= true
+        dut.io.c.sda.write #= true
         dut.clockDomain.waitSampling()
         assert(
           dut.io.a.scl.read.toBoolean == expScl,
