@@ -457,7 +457,58 @@ object I2cByteControllerSim {
     * and a subsequent Stop is accepted (returning the FSM to idle).
     */
   private def caseAddressNak(): Unit = {
-    println("PENDING: caseAddressNak")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, ACK every byte
+    SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("smoke-read-byte") { rig =>
+      rig.clockDomain.forkStimulus(period = 10)
+      rig.io.cmd.valid #= false
+      rig.io.rsp.ready #= false
+      rig.clockDomain.waitSampling(5)
+
+      // Start with a successful Write.
+      issueCmd(rig, ByteCmdKind.AddrWrite, data = 0x50 << 1)
+      val r1 = expectRsp(rig)
+      assert(
+        r1.status == ByteRspStatus.Ok,
+        s"addr: status=${r1.status}, expected Ok"
+      )
+      assert(
+        !r1.ackIn,
+        s"addr: target NAK'd (ackIn=true); expected ACK (false)"
+      )
+
+      // Stop immediately. Write probe-type access.
+      issueCmd(rig, ByteCmdKind.Stop)
+      val r2 = expectRsp(rig)
+      assert(
+        r2.status == ByteRspStatus.Ok,
+        s"stop: status=${r2.status}, expected Ok"
+      )
+
+      // Then write to every other address
+      for (addr <- 0 until 128 if addr != 0x50) {
+        issueCmd(rig, ByteCmdKind.AddrWrite, data = addr << 1)
+        val r3 = expectRsp(rig)
+        assert(
+          r3.status == ByteRspStatus.Ok,
+          s"addr: status=${r3.status}, expected Ok"
+        )
+        assert(
+          r3.ackIn,
+          s"addr: target ACK'd (ackIn=false); expected NAK (true).}"
+        )
+
+        // Stop.
+        issueCmd(rig, ByteCmdKind.Stop)
+        val r4 = expectRsp(rig)
+        assert(
+          r4.status == ByteRspStatus.Ok,
+          s"stop: status=${r4.status}, expected Ok"
+        )
+      }
+
+      println("Ok: caseAddressNak")
+    }
   }
 
   /** Target NAKs the second data byte mid-burst. Assert the rsp carries `ackIn
@@ -523,6 +574,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 5 / 12 implemented")
+    println("Done: 6 / 12 implemented")
   }
 }
