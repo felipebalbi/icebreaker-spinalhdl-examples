@@ -4,12 +4,14 @@ A from-scratch I²C **controller** and **target** in SpinalHDL, targeting
 the iCEbreaker. Both halves are built in the same project so they can
 be simulated against each other before either ever touches a real bus.
 
-Status: **Phase 0 complete + `I2cBitController` landed.** `I2cConfig`,
-`I2cIo`, `BusTiming` and the bit-level FSM (`I2cBitController`) all
-have sims. Phase 1 builds an APB3-fronted `I2cController` (mirror of
-`UartController` in the sibling project) on top of `I2cBitController`
-and the upcoming `I2cByteController`. See `TODO.md` for the full
-bring-up plan.
+Status: **Phase 0 complete + `I2cBitController` and
+`I2cByteController` landed.** `I2cConfig`, `I2cIo`, `BusTiming`,
+the bit-level FSM (`I2cBitController`) and the byte-level FSM
+(`I2cByteController`) all have sims, including a sim-side
+`BehaviouralI2cTarget` for end-to-end byte-controller cases.
+Phase 1 next builds an APB3-fronted `I2cController` (mirror of
+`UartController` in the sibling project) on top of these. See
+`TODO.md` for the full bring-up plan.
 
 ## What's in scope
 
@@ -31,10 +33,12 @@ bring-up plan.
 
 ## What's out of scope (for now)
 
-- Multi-master arbitration. `I2cBitController` already detects
-  arbitration loss spec-compliantly (releases both lines, returns
-  to idle), but the higher-level FSMs and the regif don't yet
-  surface or recover from it.
+- Multi-master arbitration. `I2cBitController` detects arbitration
+  loss spec-compliantly and `I2cByteController` surfaces it as
+  `ByteRspStatus.ArbLost` + a wedge regime that the SW driver
+  recovers from with `Stop` or `RepStart`. Only the Phase-1
+  `I2cController` regif still needs to expose this through a
+  status/ISR bit.
 - High-speed mode (3.4 MHz). Same reason.
 - SMBus / PMBus quirks (host notify, packet error checking, etc.).
   The FSM should be flexible enough to add these later.

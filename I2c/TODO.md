@@ -29,6 +29,12 @@ survives independently of the source.
 - [x] `BusTimingSim` (pure-Scala spec-floor audit across BusSpeed × clkFreqHz)
 - [x] `I2cBitController` (9-state FSM, registered SCL/SDA drives, optional clock stretching, spec-compliant arbitration loss)
 - [x] `I2cBitControllerSim` (Start/Stop, write-byte, read-byte, RepStart, arbitration loss, clock stretching)
+- [x] `BehaviouralI2cTarget` (sim-side slave model: address ACK, configurable per-byte `ackPattern`, ROM-style register file)
+- [x] `I2cByteController` (byte-level FSM over `I2cBitController`; address + R/W̅, write/read bursts, RepStart/Stop, wedge regime on NAK / arb-loss, `InvalidSeq` for SW misuse)
+- [x] `I2cByteControllerSim` (12 cases: smoke r/w, multi-byte r/w, RepStart, address NAK, data NAK, invalid-seq from-idle / wedged / direction-mismatch, arb-loss during-Start / mid-byte)
+- [x] `BehaviouralI2cTarget` (sim-side slave model: address ACK, configurable per-byte ackPattern, ROM-style register file)
+- [x] `I2cByteController` (byte-level FSM over `I2cBitController`; address + R/W̅, write/read bursts, RepStart/Stop, wedge regime on NAK / arb-loss, `InvalidSeq` for SW misuse)
+- [x] `I2cByteControllerSim` (12 cases: smoke r/w, multi-byte r/w, RepStart, address NAK, data NAK, invalid-seq from-idle / wedged / direction-mismatch, arb-loss during-Start / mid-byte)
 
 ---
 
@@ -403,95 +409,137 @@ aggregate and `.PHONY`.
 
 ---
 
-### 🔲 Step 5 — `I2cByteController`
+### ✅ Step 5 — `I2cByteController`
 
 **Goal:** lift the bit-level FSM to byte-level transactions —
 address + R/W̅, payload bytes, and the all-important ACK slot —
 so callers above this layer never have to think about
 `BitCmd.WriteBit` again.
 
-**File:** `src/hw/I2cByteController.scala`
+**Files:** `src/hw/I2cByteController.scala`,
+`src/sim/BehaviouralI2cTarget.scala`,
+`src/sim/I2cByteControllerSim.scala`,
+`src/sim/I2cIoSim.scala` (extended to 3 ports for arb-loss tests).
 
-**Suggested IO:**
-```scala
-object ByteCmdKind extends SpinalEnum {
-  val AddrWrite, AddrRead, WriteData, ReadData, RepStart, Stop = newElement()
-}
+**What landed:**
 
-case class ByteCmd() extends Bundle {
-  val kind   = ByteCmdKind()
-  val data   = Bits(8 bits)   // address (with R/W̅) or write payload
-  val ackOut = Bool()         // for ReadData: ack=0 to continue, 1 to NACK
-}
+- `ByteCmdKind` SpinalEnum: `{ AddrWrite, AddrRead, WriteData,
+  ReadData, RepStart, Stop }` exactly as the hint suggested.
+- `ByteCmd` / `ByteRsp` bundles. `cmd.ackOut` is the master's
+  ACK bit during reads (0 = continue, 1 = NAK-final). `rsp.ackIn`
+  is the target's ACK bit during writes (0 = ACK, 1 = NAK).
+- `ByteRspStatus` SpinalEnum: `{ Ok, ArbLost, InvalidSeq }` —
+  added beyond the hint to give the FSM a first-class way to
+  report SW misuse without conflating it with bus-level NAKs.
+  See "Divergences" below.
+- One `cmd.fire` produces exactly one `rsp.fire` for every kind,
+  including `RepStart` / `Stop` (the upper layer can rely on a
+  1:1 handshake; `data` / `ackIn` are "don't care" on those).
+- Bit FSM is driven through three-state spokes:
+  `<op>IssueState → <op>WaitState → <op>RspState`. The wait
+  state listens for `arbLost` and short-circuits straight to
+  `*RspState` with `status = ArbLost` so we don't clock out
+  bits we no longer own.
+- **Wedge regime.** A failed write (address NAK, data NAK, or
+  any `ArbLost`) sets `mustTerminate := True`. While wedged,
+  only `Stop` and `RepStart` are accepted; everything else
+  returns `InvalidSeq` without touching the bus. `mustTerminate`
+  and `arbLostReg` clear on `Stop.onExit` (or on the next
+  accepted `AddrWrite` / `AddrRead`).
+- **Sticky `arbLostReg`.** Every `*RspState` reports
+  `status := arbLostReg ? ArbLost | Ok`, including
+  `stopRspState` — so the recovering Stop's rsp still carries
+  `ArbLost` before the flag clears on `onExit`. The next
+  `AddrWrite` sees `Ok`.
 
-case class ByteRsp() extends Bundle {
-  val data    = Bits(8 bits) // bytes read back
-  val ackIn   = Bool()        // ACK reported by the target (0 = ack)
-  val arbLost = Bool()
-}
+**Divergences from the original hint:**
 
-val io = new Bundle {
-  val cmd = slave  Stream ByteCmd()
-  val rsp = master Stream ByteRsp()
-  val bus = master(I2cIo())
-}
-```
+1. **Three statuses, not a single `arbLost` Bool.** The hint's
+   `rsp.arbLost` Bool can't distinguish "bus arb lost" from "SW
+   tried to do something illegal". Splitting into a tri-valued
+   `ByteRspStatus.{Ok, ArbLost, InvalidSeq}` lets sims (and the
+   eventual SW driver) tell the two failure modes apart and
+   funnels the impossible cases through a single
+   `errorRspState` hub instead of polluting every spoke.
+2. **Wedge regime is explicit.** The hint suggested "complete
+   the current rsp with `arbLost = True`, release the bus, and
+   stay quiescent." What landed is more conservative: don't
+   release the bus on the FSM's own initiative, just refuse
+   non-terminator commands. Forcing the SW driver to issue a
+   matching `Stop` makes the post-failure waveform predictable
+   and SMBus-compatible.
+3. **`BehaviouralI2cTarget` is a real `Component`, not a Scala
+   passive snoop.** It's a synthesizable-shape `Component` (sim
+   only — never built into a bitstream) with its own FSM that
+   decodes Start/Stop, sniffs the address byte, ACKs at
+   `tCfg.targetAddress`, and serves a ROM-style register file
+   (`Vec.tabulate(256) { ... }` driven from `tCfg.regFileInit`).
+   `tCfg.ackPattern` lets a test NAK any subset of data bytes
+   mid-burst. Reused by Phase 2's target-side bring-up
+   (Steps 8–10).
+4. **`I2cIoBus` extended to 3 ports.** Per AGENTS.md guidance
+   ("extend rather than fork a new helper" when a third
+   participant is needed): port `c` is the competitor master
+   for the arb-loss tests. The existing `I2cIoSim` smoke test
+   was updated to drive `c` released; `I2cBitControllerSim`
+   doesn't use `I2cIoBus` so wasn't affected.
 
-**Design notes:**
-- **One `cmd.fire` = one bit-level transaction.** The byte FSM
-  drives the bit FSM eight times per data byte plus once for the
-  ACK slot. The ACK slot is a `ReadBit` from the target's POV
-  during writes (we listen) and a `WriteBit` of the master ACK
-  bit during reads.
-- **Address byte** = `{ addr[6:0], rw }`. For `AddrWrite`, R/W̅
-  = 0; for `AddrRead`, R/W̅ = 1. The byte controller does not
-  bake in the addressing mode — `cfg.addrMode` decides whether
-  it's one address byte or the 10-bit escape sequence (latter
-  is plumbed through but only `SevenBits` is exercised in
-  Step 5).
-- **Stream contracts.** Each `cmd.fire` produces exactly one
-  `rsp.fire` for `AddrWrite` / `AddrRead` / `WriteData` /
-  `ReadData`. `RepStart` and `Stop` fire `rsp` with `ackIn` /
-  `data` set to "don't care" so the upper layer can rely on a
-  1:1 handshake.
-- **Error propagation.** If the bit-controller raises `arbLost`
-  mid-byte, complete the current `rsp` with `arbLost = True`,
-  release the bus, and stay quiescent until the producer drains
-  / restarts.
+**Sim:** `I2cByteControllerSim` covers 12 cases, more than the
+4 the hint listed. The wedge regime + the `InvalidSeq` status
+surface their own failure modes that the original 4-case hint
+predates:
 
-**Sim hints (`src/sim/I2cByteControllerSim.scala`):**
-- Build a Scala-side **behavioural target** (`BehaviouralTargetMock`)
-  that lives in `src/sim/`: it watches the wired-AND bus, decodes
-  START / STOP / address / R/W̅, ACKs at a configured slave
-  address, and serves a small register file. Reuse it in Steps
-  6, 7, 9, 10.
-- Cases:
-  - `AddrWrite(0x50) → WriteData(0xAB) → Stop` against a target
-    that ACKs both bytes; assert mock register file received
-    `0xAB`.
-  - `AddrWrite(0x50) → WriteData(reg) → RepStart →
-    AddrRead(0x50) → ReadData(ack=continue) →
-    ReadData(ack=nack) → Stop` round-trip against a 2-byte
-    register; assert the bytes match.
-  - NACK on address: the mock answers a wrong address; assert
-    `rsp.ackIn = 1` and the FSM stops cleanly.
-  - Mid-byte arbitration loss: assert `rsp.arbLost = 1` once and
-    only once.
+- **smoke write byte / smoke read byte:** address + one data
+  byte against `BehaviouralI2cTarget`.
+- **multi-byte write / multi-byte read:** four-byte bursts;
+  read uses `cmd.ackOut=true` only on the last byte to
+  terminate.
+- **repeated start, read after write:** `AddrWrite → WriteData
+  → RepStart(addr|R) → ReadData → Stop`; load-bearing register
+  preload via `tCfg.regFileInit`.
+- **address NAK:** sweeps every 7-bit address that isn't the
+  target's, asserts NAK + clean Stop recovery per iteration.
+- **data NAK:** target ACKs the address + first data byte,
+  NAKs the second; asserts `ackIn=true`, then proves the wedge
+  by failing a follow-up `WriteData` with `InvalidSeq`.
+- **invalid sequence from idle:** non-Addr* commands from idle
+  return `InvalidSeq` without touching the bus.
+- **invalid sequence wedged:** wedges via always-NAK target,
+  probes that all four non-terminators return `InvalidSeq`,
+  recovers via `Stop` and via `RepStart`-then-`Stop`.
+- **invalid sequence direction mismatch:** `WriteData` on a
+  read txn (and vice versa) is a soft reject; the transaction
+  continues and a `goodData` follow-up succeeds.
+- **arb-loss during Start:** competitor pulls SDA low before
+  the address byte; DUT detects on the first 1-bit release and
+  surfaces `ArbLost`. Wedge proof + Stop recovery + uncontested
+  follow-up txn.
+- **arb-loss mid-byte:** clean address phase, then a forked
+  thread pulls competitor SDA low partway through
+  `WriteData(0xFF)`. Same wedge + recovery shape.
 
-**Makefile:** `sim-bytectrl` target.
+**Open follow-ups:**
 
-**Scaffold landed** — `src/sim/BehaviouralI2cTarget.scala` (config
-knobs + IO + release-bus placeholder), `src/sim/I2cByteControllerSim.scala`
-(header, `issueCmd` / `expectRsp` / `ByteRspSnapshot` helper signatures,
-12 stubbed cases, `main`), and `sim-bytectrl` wired into the Makefile
-`sim` aggregate. Bodies still TODO.
+- The arb-loss tests' recovery proofs only assert the recovery
+  `AddrWrite` returns `status = Ok` (controller un-wedged); they
+  don't assert the target ACKs. The behavioural target's FSM
+  can be knocked out of sync by the contention/Stop sequence.
+  Tightening this would mean either (a) hardening the target's
+  Start/Stop detector against held-low contention, or (b)
+  clocking the target through enough idle cycles after recovery
+  to let it self-resync. Deferred.
+- `tCfg.ackPattern` indexes by the master's `byteIdx`, not by
+  any per-transaction reset. Multi-burst tests that need a
+  fresh ACK pattern per RepStart would have to compute their
+  pattern with the wrap-around in mind.
+- A stretch-timeout register (mentioned in the original Step 4
+  follow-ups). Belongs on `I2cController`'s regif. Deferred to
+  Step 6.
+- 10-bit addressing is plumbed through `cfg.addrMode` but only
+  `SevenBits` is exercised. Phase-3 stretch goal.
 
-Divergence from the original 4-case hint above: the scaffold has 12
-cases. The four extra beyond the hints are `caseMultiByteWrite`,
-`caseMultiByteRead`, `caseDataNak`, and three `caseInvalidSeq*` paths
-(from-idle, wedged-after-NAK, direction-mismatch) — added because
-the post-`hasStarted`-removal byte FSM exposes `ByteRspStatus.InvalidSeq`
-as a first-class outcome that the original hint block predates.
+**Makefile:** `sim-bytectrl` target added; included in the `sim`
+aggregate and `.PHONY`.
 
 ---
 

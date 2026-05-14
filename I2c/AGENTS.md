@@ -104,12 +104,27 @@ direction. Don't manually flip fields.
 ## Sim glue: `I2cIoBus`
 
 `I2cIoBus` (in `src/sim/I2cIoSim.scala`) is the reusable wired-AND
-helper for any sim that needs two `I2cIo` participants on the same
-bus. Wiring is `bus = a.write & b.write` for each line — anyone
-pulling low wins, otherwise the (modelled) pull-up holds high.
+helper for any sim that needs multiple `I2cIo` participants on
+the same bus. Wiring is `bus = a.write & b.write & c.write` for
+each line — anyone pulling low wins, otherwise the (modelled)
+pull-up holds high.
 
-When you need a third participant later (multi-master tests),
-extend `I2cIoBus` rather than spinning up a new helper.
+The bus has three ports today:
+- `a` — DUT (e.g. `I2cByteController` under test).
+- `b` — `BehaviouralI2cTarget` (the sim-side slave model).
+- `c` — competitor master, used by `caseArbLoss*` in
+  `I2cByteControllerSim` to simulate a second master winning
+  the bus during the address byte or mid-data-byte. Tests that
+  don't need a competitor poke `competitorScl`/`competitorSda`
+  to `true` (released) at setup time so port `c` stays out of
+  the way.
+
+When you need a fourth participant later (multi-target tests,
+multi-master with three contenders), extend `I2cIoBus` rather
+than spinning up a new helper. Existing 3-port consumers must
+be updated in lockstep — `I2cBitControllerSim` doesn't use
+`I2cIoBus` so it's not affected by such changes, but
+`I2cIoSim`'s smoke test and `I2cByteControllerSim`'s `Rig` are.
 
 ## `I2cConfig` is the by-value compile-time record
 
