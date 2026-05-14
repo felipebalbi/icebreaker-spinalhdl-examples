@@ -681,7 +681,62 @@ object I2cByteControllerSim {
     *   - ReadData on a write transaction (kind = AddrWrite) → InvalidSeq.
     */
   private def caseInvalidSeqDirectionMismatch(): Unit = {
-    println("PENDING: caseInvalidSeqDirectionMismatch")
+    val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
+    val tCfg = BehaviouralI2cTargetConfig() // address 0x50, always ACK
+    SimConfig.withWave
+      .compile(Rig(cfg, tCfg))
+      .doSim("invalid-seq-dir-mismatch") { rig =>
+        rig.clockDomain.forkStimulus(period = 10)
+        rig.io.cmd.valid #= false
+        rig.io.rsp.ready #= false
+        rig.clockDomain.waitSampling(5)
+
+        for (
+          (addr, badData, goodData) <- Seq(
+            (ByteCmdKind.AddrWrite, ByteCmdKind.ReadData, ByteCmdKind.WriteData),
+            (ByteCmdKind.AddrRead, ByteCmdKind.WriteData, ByteCmdKind.ReadData)
+          )
+        ) {
+          issueCmd(rig, addr, data = 0x50 << 1)
+          val r1 = expectRsp(rig)
+          assert(
+            r1.status == ByteRspStatus.Ok,
+            s"$addr: status=${r1.status}, expected Ok"
+          )
+          assert(
+            !r1.ackIn,
+            s"$addr: target NAK'd (ackIn=true); expected ACK (false)"
+          )
+
+          issueCmd(rig, badData, data = 0)
+          val r2 = expectRsp(rig)
+          assert(
+            r2.status == ByteRspStatus.InvalidSeq,
+            s"$addr: status=${r2.status}, expected InvalidSeq"
+          )
+
+          issueCmd(rig, goodData, data = 0)
+          val r3 = expectRsp(rig)
+          assert(
+            r3.status == ByteRspStatus.Ok,
+            s"$addr: status=${r3.status}, expected Ok"
+          )
+
+          issueCmd(rig, ByteCmdKind.Stop)
+          val r4 = expectRsp(rig)
+          assert(
+            r4.status == ByteRspStatus.Ok,
+            s"stop: status=${r4.status}, expected Ok"
+          )
+        }
+
+        // Let the bus settle, then check it's in the expected state.
+        rig.clockDomain.waitSampling(20)
+        assert(rig.sclWriteOut.toBoolean, "SCL not released after Stop")
+        assert(rig.sdaWriteOut.toBoolean, "SDA not released after Stop")
+
+        println("Ok: caseInvalidSeqDirectionMismatch")
+      }
   }
 
   // ----- Runner ---------------------------------------------------------
@@ -699,6 +754,6 @@ object I2cByteControllerSim {
     caseInvalidSeqFromIdle()
     caseInvalidSeqWedged()
     caseInvalidSeqDirectionMismatch()
-    println("Done: 8 / 12 implemented")
+    println("Done: 9 / 12 implemented")
   }
 }
