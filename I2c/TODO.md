@@ -597,27 +597,42 @@ deliver):**
                            [5]=cmd_overrun     CMD was written while cmd_busy=1;
                                                the new write was dropped
                            [6]=rx_done         a byte was pushed into RX FIFO
+                           [7]=tx_underrun     CMD needed a TXDATA byte but
+                                               TXDATA was empty; the CMD was
+                                               dropped (see CMD below)
 0x10 IER              RW   per-bit enable / interrupt mask; matches ISR
 0x14 CMD              WO   write posts ONE byte-command to the controller. CMD
                            is a 1-deep shadow register, NOT a FIFO — firmware
                            polls STATUS.cmd_busy (or waits for ISR.cmd_done)
                            between writes. Writes while cmd_busy=1 are
                            silently dropped and ISR.cmd_overrun is set.
-                           [7:0]=byte          inline data byte (ignored if
-                                               use_txdata=1 or kind ∈
-                                               {ReadData, RepStart, Stop})
-                           [10:8]=kind         0=AddrWrite 1=AddrRead 2=WriteData
+                           [2:0]=kind          0=AddrWrite 1=AddrRead 2=WriteData
                                                3=ReadData 4=RepStart 5=Stop
-                           [11]=ack_out        master ACK polarity for ReadData
+                           [3]=ack_out         master ACK polarity for ReadData
                                                (0=ACK and continue,
                                                 1=NACK before STOP)
-                           [12]=use_txdata     1 = pop a byte from the TXDATA
-                                               FIFO on AddrWrite/WriteData;
-                                               0 = use the inline byte field.
+                           Kinds AddrWrite / AddrRead / RepStart / WriteData
+                           pop one byte from TXDATA on issue (the address byte,
+                           the RepStart address+R/W byte, or the data byte
+                           respectively). Kinds ReadData / Stop do not. If a
+                           payload-needing CMD is posted while TXDATA is empty,
+                           the CMD is dropped and ISR.tx_underrun is set —
+                           firmware must push the payload byte to TXDATA before
+                           writing CMD.
+                           ReadData is additionally gated on RX FIFO space when
+                           CTRL.rx_enable=1: if the FIFO is full the CMD is
+                           held in the shadow (cmd_busy stays 1) until firmware
+                           pops a byte from RXDATA. There is no rx_overrun
+                           sticky bit — back-pressure is by construction.
+                           Firmware that wants to avoid the parked-CMD path
+                           altogether can poll RX_FIFO_STATUS.empty / .count
+                           before issuing each ReadData; this is the expected
+                           pattern when the read loop is paced by software.
 0x18 TXDATA           WO   write pushes one byte into the TX-data FIFO. Sized
-                           by cfg.txFifoDepth so firmware can pre-load a burst
-                           payload, then issue WriteData CMDs with
-                           use_txdata=1.
+                           by cfg.txFifoDepth. Every on-wire payload byte —
+                           the address byte for AddrWrite/AddrRead, the
+                           address+R/W byte for RepStart, and each WriteData
+                           byte — is sourced from this FIFO.
 0x1C RXDATA           RO   read returns the front of the RX FIFO and pops it
                            (returns 0 if RX_FIFO_STATUS.empty=1). Sized by
                            cfg.rxFifoDepth.
@@ -659,17 +674,42 @@ val io = new Bundle {
   semantics obvious: `STATUS.cmd_busy` is the gate; writes while
   busy fail loudly via `ISR.cmd_overrun` rather than being
   silently re-queued.
-- **Why split CMD and TXDATA.** One CMD = one byte-command, but a
-  burst write naturally has N data bytes. Firmware preloads
-  TXDATA (default 16-deep), then issues WriteData CMDs with
-  `use_txdata=1`; each CMD pops the next TXDATA byte. The
-  alternative (a single packed CMD) would force one bus-write
-  per byte even when firmware already has the payload in hand.
-  This is the OpenCores i2c_master_top split.
-- **Inline byte in CMD** is the single-byte fast path. Address
-  bytes (1 byte per transaction) and most one-shot register pokes
-  fit. Set `use_txdata=0` and the byte field carries the value;
-  no need to involve the TXDATA FIFO at all.
+- **Why split CMD and TXDATA.** CMD carries the opcode (`kind` +
+  `ack_out`); TXDATA carries every byte that goes on the wire.
+  Kinds that need a payload (`AddrWrite`, `AddrRead`, `RepStart`,
+  `WriteData`) pop one TXDATA byte on issue; `ReadData` and `Stop`
+  don't. RepStart counts as payload-needing because its byte is
+  the next address+R/W on the wire (see `ByteCmd.data` doc in
+  `I2cByteController`). The worst case — a single-byte register
+  poke — costs two APB writes (TXDATA then CMD) instead of one;
+  invisible at any spec speed (~25 µs / 2.5 µs per byte at 100 kHz
+  / 1 MHz). The win is one source of truth for on-wire bytes, no
+  `use_txdata` mux in the cmd-issue path, and a 4-bit-used CMD.
+  This is still the OpenCores i2c_master_top control-vs-data split,
+  minus the inline-byte fast-path. For burst writes firmware
+  preloads N bytes into TXDATA and issues N `WriteData` CMDs, each
+  popping the next TXDATA byte.
+- **Ordering / underrun.** Firmware must push the payload byte to
+  TXDATA *before* writing CMD. If a payload-needing CMD is posted
+  while TXDATA is empty, the cmd-issue logic drops the CMD and sets
+  sticky `ISR.tx_underrun` (W1C). This fails loudly rather than
+  silently sending a stale FIFO byte, and it's symmetric with how
+  `cmd_overrun` handles "wrote CMD while busy".
+- **Why no `rx_overrun`.** Asymmetric with `tx_underrun` for a
+  reason. A misordered TX would put a stale byte on the wire —
+  silent corruption, hence the loud sticky bit. RX overrun is
+  preventable by construction: each `ReadData` is firmware-issued
+  and we own SCL, so the cmd-issue path simply gates `ReadData` on
+  `rxFifo.io.push.ready` (when `CTRL.rx_enable=1`). A full FIFO
+  leaves the CMD parked in the shadow with `cmd_busy=1` until
+  firmware pops a byte; SCL stays idle and no byte is ever lost.
+  Firmware that prefers to never hit the parked-CMD path can poll
+  `RX_FIFO_STATUS` (`.empty` / `.count`) before each `ReadData` —
+  the parked-CMD path is the safety net, not the expected
+  steady-state. When `rx_enable=0` the gate is bypassed (bytes are
+  dropped per the existing spec). A firmware bug that never pops
+  RXDATA is self-evident — `cmd_busy` is stuck high — and recovers
+  by clearing `CTRL.enable`.
 - **PRESCALE** is the user-tunable runtime knob the BusTiming
   review identified. `cfg.quarterPeriodCycles` becomes the *reset*
   value of PRESCALE; downstream timing is computed from PRESCALE,
@@ -685,7 +725,15 @@ val io = new Bundle {
 - **Sub-block instantiation:** one `BusTiming(cfg)`, one
   `I2cByteController(cfg)`, two `StreamFifo`s (TX-data, RX-data),
   the regif `Apb3BusInterface`, the CMD shadow register and the
-  `cmd_busy` FSM that drives `byteCtrl.io.cmd.valid`.
+  `cmd_busy` FSM that drives `byteCtrl.io.cmd.valid`. The
+  cmd-issue path gates payload-needing kinds on
+  `txFifo.io.pop.valid`: on miss it consumes the CMD shadow,
+  sets `ISR.tx_underrun`, and does **not** forward to the
+  byte-controller; on hit it pops one TXDATA byte into
+  `byteCtrl.io.cmd.data` and fires. `ReadData` is additionally
+  gated on `rxFifo.io.push.ready` (when `CTRL.rx_enable=1`); on
+  miss the CMD shadow stays loaded (no advance, no error bit) so
+  back-pressure is automatic.
 - **Demo entrypoints:** `I2cControllerVerilog` and
   `I2cControllerDocs` `object`s with `main(args)`. `Docs` runs
   `accept(DocHtml(...))` / `DocCHeader` / `DocJson` / `DocRalf` /
@@ -702,21 +750,35 @@ val io = new Bundle {
 - Compose the controller against a Scala-side
   `BehaviouralTargetMock` (built in Step 5) on a shared `I2cIoBus`.
 - Cases:
-  - **Single-byte register write** via inline CMD bytes: AddrWrite
-    (use_txdata=0, byte=slave addr) → WriteData (use_txdata=0,
-    byte=reg) → WriteData → Stop. Assert mock register file.
-  - **Burst write via TXDATA**: preload TXDATA with N bytes;
-    issue AddrWrite + N × WriteData(use_txdata=1) + Stop; assert
-    mock received the bytes in order.
-  - **Read with RepStart**: AddrWrite(reg) → RepStart →
-    AddrRead(slave) → ReadData(ack=continue) → ReadData(ack=nack) →
-    Stop. Pop RXDATA twice; assert bytes.
+  - **Single-byte register write** through TXDATA: push slave
+    addr → CMD AddrWrite; push reg addr → CMD WriteData; push
+    value → CMD WriteData; CMD Stop. Assert mock register file.
+  - **Burst write via TXDATA**: preload TXDATA with N bytes
+    (slave addr + N − 1 payload bytes); issue AddrWrite +
+    (N − 1) × WriteData + Stop; assert mock received the bytes
+    in order.
+  - **Read with RepStart**: push slave addr (W) → CMD AddrWrite;
+    push reg addr → CMD WriteData; push slave addr (R) → CMD
+    RepStart; CMD ReadData(ack=continue); CMD ReadData(ack=nack);
+    CMD Stop. Pop RXDATA twice; assert bytes.
   - **NACK on address**: target answers a wrong address. Assert
     `ISR.addr_nack` sets and stays sticky until W1C clears it.
   - **CMD overrun**: deliberately write CMD twice back-to-back
     while `cmd_busy=1`. Assert the second write is dropped, the
     bus traffic only contains the first command, and
     `ISR.cmd_overrun` sets.
+  - **TX underrun**: write CMD AddrWrite while TXDATA is empty.
+    Assert no bus traffic, `ISR.tx_underrun` sets and stays
+    sticky until W1C clears it, and the controller accepts a
+    fresh AddrWrite afterwards (push TXDATA first this time).
+  - **RX back-pressure**: set up a read burst longer than
+    `rxFifoDepth` (push slave addr → AddrRead, then a stream of
+    ReadData CMDs) without popping RXDATA. After `rxFifoDepth`
+    bytes have been received, the next `ReadData` should park in
+    the shadow with `cmd_busy=1`, SCL should stay idle, and no
+    `ISR.*overrun*` bit should set. Pop one RXDATA byte and
+    assert the bus resumes and `cmd_busy` falls when the parked
+    CMD retires.
   - **PRESCALE retune**: write a different value, assert the
     on-bus SCL period changes accordingly.
 
