@@ -71,12 +71,24 @@ object AddrMode extends SpinalEnum {
   *   comparator/timeout register. Make this a build-time toggle rather than a
   *   runtime input so the logic actually disappears from synthesised designs
   *   that don't need it.
+  * @param txFifoDepth
+  *   Depth of the TX-data FIFO inside `I2cController`, in bytes. Sized so that
+  *   firmware can pre-load a burst payload and then issue back-to-back
+  *   `WriteData` CMDs with `use_txdata=1`. The depth must fit in the 8-bit
+  *   `depth` slot of `TX_FIFO_STATUS` (so `<= 255`), and a 1-deep FIFO would
+  *   degenerate to a single shadow register — pick `>= 2`.
+  * @param rxFifoDepth
+  *   Depth of the RX-data FIFO inside `I2cController`, in bytes. Same width
+  *   constraint as `txFifoDepth` (must fit in the 8-bit `depth` field of
+  *   `RX_FIFO_STATUS`).
   */
 case class I2cConfig(
     clkFreqHz: Int = 12000000,
     busSpeed: BusSpeed.E = BusSpeed.Standard,
     addrMode: AddrMode.E = AddrMode.SevenBits,
-    useClockStretching: Boolean = false
+    useClockStretching: Boolean = false,
+    txFifoDepth: Int = 16,
+    rxFifoDepth: Int = 16
 ) {
 
   /** Target SCL frequency in Hz, looked up from [[busSpeed]].
@@ -135,4 +147,17 @@ case class I2cConfig(
   // rounding, but documents the invariant the rest of the codebase
   // relies on.
   require(quarterPeriodCycles >= 1)
+
+  // FIFO depths are exposed verbatim in the 8-bit `depth` slot of
+  // {TX,RX}_FIFO_STATUS, so they have to fit. A 1-deep FIFO would
+  // collapse to a single register (and `count` would be a 1-bit
+  // signal that confuses the empty/full encoding) — require >= 2.
+  require(
+    txFifoDepth >= 2 && txFifoDepth <= 255,
+    s"txFifoDepth=$txFifoDepth must be in [2, 255]"
+  )
+  require(
+    rxFifoDepth >= 2 && rxFifoDepth <= 255,
+    s"rxFifoDepth=$rxFifoDepth must be in [2, 255]"
+  )
 }

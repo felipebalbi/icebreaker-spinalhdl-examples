@@ -48,14 +48,14 @@ case class I2cController(
     doc = "Drain CMD shadow into byte-controller.")
   val ctrlRxEnable = CTRL.field(Bool(), RW, 0,
     doc = "Push read bytes into RX FIFO. 0 = drop them.")
-  val ctrlStretchEnable =
+  val ctrlStretchEnable: Bool =
     if (cfg.useClockStretching)
       CTRL.field(Bool(), RW, 1, doc = "Honour clock-stretching path.")
     else {
       // Reserve the bit so the address map matches across cfg variants,
       // but tie it to 0 - there is no stretch path to gate.
       CTRL.field(Bool(), RO, 0, doc = "Reserved (cfg.useClockStretching=false).") := False
-      false
+      False
     }
 
   // 0x08 STATUS --------------------------------------------------
