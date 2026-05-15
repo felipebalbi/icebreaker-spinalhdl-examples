@@ -603,17 +603,17 @@ deliver):**
                            polls STATUS.cmd_busy (or waits for ISR.cmd_done)
                            between writes. Writes while cmd_busy=1 are
                            silently dropped and ISR.cmd_overrun is set.
-                           [2:0]=kind          0=AddrWrite 1=AddrRead 2=WriteData
-                                               3=ReadData 4=RepStart 5=Stop
-                           [3]=ack_out         master ACK polarity for ReadData
-                                               (0=ACK and continue,
-                                                1=NACK before STOP)
-                           [4]=use_txdata      1 = pop a byte from the TXDATA
-                                               FIFO on AddrWrite/WriteData;
-                                               0 = use the inline byte field.
-                           [15:8]=byte         inline data byte (ignored if
+                           [7:0]=byte          inline data byte (ignored if
                                                use_txdata=1 or kind ∈
                                                {ReadData, RepStart, Stop})
+                           [10:8]=kind         0=AddrWrite 1=AddrRead 2=WriteData
+                                               3=ReadData 4=RepStart 5=Stop
+                           [11]=ack_out        master ACK polarity for ReadData
+                                               (0=ACK and continue,
+                                                1=NACK before STOP)
+                           [12]=use_txdata     1 = pop a byte from the TXDATA
+                                               FIFO on AddrWrite/WriteData;
+                                               0 = use the inline byte field.
 0x18 TXDATA           WO   write pushes one byte into the TX-data FIFO. Sized
                            by cfg.txFifoDepth so firmware can pre-load a burst
                            payload, then issue WriteData CMDs with
