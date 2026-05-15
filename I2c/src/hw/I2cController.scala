@@ -75,7 +75,7 @@ case class I2cController(
     doc = "Target NACKed data phase.")
   val isrArbLost = ISR.field(Bool(), W1C, 0,
     doc = "If set, then we lost arbitration.")
-  val isrStretchTimeout = ISR.field(Bool(), W1C, 0,
+  val isrStretchTimeout = ISR.field(Bool(), RO, 0,
     doc = "Reserved for future use. Currently tied to 0.")
   val isrCmdDone = ISR.field(Bool(), W1C, 0,
     doc = "Command retired (byte-ctrl finished).")
