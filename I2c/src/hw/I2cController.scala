@@ -121,8 +121,7 @@ case class I2cController(
     Bool(),
     W1C,
     0,
-    doc =
-      "CMD needed a TXDATA byte but TXDATA was empty; the CMD was dropped."
+    doc = "CMD needed a TXDATA byte but TXDATA was empty; the CMD was dropped."
   )
 
   // Sticky-event triggers from byteCtrl. Each W1C bit latches on the
@@ -133,16 +132,33 @@ case class I2cController(
   // arb_lost: byteCtrl publishes ArbLost as a status field on the
   // response stream — assert on the cycle the response is consumed
   // (rsp.fire is a one-cycle pulse, perfect for a sticky latch).
+  val inFlightKind = Reg(ByteCmdKind()) init (ByteCmdKind.Stop)
+  when(byteCtrl.io.cmd.fire) { inFlightKind := byteCtrl.io.cmd.payload.kind }
+
+  def inAddrPhase = inFlightKind === ByteCmdKind.AddrWrite ||
+    inFlightKind === ByteCmdKind.AddrRead ||
+    inFlightKind === ByteCmdKind.RepStart
+
+  def inDataPhase = inFlighKind === ByteCmdKind.WriteData
+
+  when(
+    byteCtrl.io.rsp.fire && byteCtrl.io.rsp.payload.status === ByteRspStatus.Ok
+  ) {
+    when(inAddrPhase && byteCtrl.io.rsp.payload.ackIn) { isrAddrNack.set() }
+    when(inDataPhase && byteCtrl.io.rsp.payload.ackIn) { isrDataNack.set() }
+  }
   when(
     byteCtrl.io.rsp.fire &&
       byteCtrl.io.rsp.payload.status === ByteRspStatus.ArbLost
   ) {
     isrArbLost.set()
   }
-
-  // TODO (wiring pass): addr_nack / data_nack (need cmd-kind context),
-  // cmd_done / cmd_overrun (need cmd-issue FSM), rx_done (needs RX
-  // FIFO), tx_underrun (needs cmd-issue FSM + TX FIFO).
+  when(byteCtrl.io.rsp.fire) {
+    isrCmdDone.set()
+  }
+  
+  // TODO (wiring pass): cmd_overrun (need cmd-issue FSM), rx_done
+  // (needs RX FIFO), tx_underrun (needs cmd-issue FSM + TX FIFO).
 
   // 0x10 IER --------------------------------------------------
   // Mirrors the ISR layout bit-for-bit so firmware can mask events
@@ -330,7 +346,11 @@ case class I2cController(
     doc = "Bus speed: 0 = Standard, 1 = Fast, 2 = Fast+."
   )
   val cfgInfoAddrMode =
-    CFG_INFO.field(UInt(1 bits), RO, doc = "Address mode: 0 = 7-bit, 1 = 10-bit.")
+    CFG_INFO.field(
+      UInt(1 bits),
+      RO,
+      doc = "Address mode: 0 = 7-bit, 1 = 10-bit."
+    )
   val cfgInfoUseStretch = CFG_INFO.field(
     Bool(),
     RO,
