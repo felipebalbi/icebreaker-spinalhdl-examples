@@ -125,9 +125,24 @@ case class I2cController(
       "CMD needed a TXDATA byte but TXDATA was empty; the CMD was dropped."
   )
 
-  // TODO: wire .set() triggers from byteCtrl events (addr/data NACK,
-  // arbLost, cmd_done, cmd_overrun, rx_done, tx_underrun) in the
-  // wiring pass. Until then the W1C bits stay sticky-low.
+  // Sticky-event triggers from byteCtrl. Each W1C bit latches on the
+  // one-cycle pulse below and stays set until firmware writes 1 to
+  // clear it. Same idiom as UartController:
+  //   when(rxCore.io.framingError) { isrFraming.set() }
+  //
+  // arb_lost: byteCtrl publishes ArbLost as a status field on the
+  // response stream — assert on the cycle the response is consumed
+  // (rsp.fire is a one-cycle pulse, perfect for a sticky latch).
+  when(
+    byteCtrl.io.rsp.fire &&
+      byteCtrl.io.rsp.payload.status === ByteRspStatus.ArbLost
+  ) {
+    isrArbLost.set()
+  }
+
+  // TODO (wiring pass): addr_nack / data_nack (need cmd-kind context),
+  // cmd_done / cmd_overrun (need cmd-issue FSM), rx_done (needs RX
+  // FIFO), tx_underrun (needs cmd-issue FSM + TX FIFO).
 
   // 0x10 IER --------------------------------------------------
   // Mirrors the ISR layout bit-for-bit so firmware can mask events
