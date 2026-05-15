@@ -612,16 +612,16 @@ object I2cByteControllerSim {
     * bus further.
     *
     * The bit controller only flags arb-loss when *releasing* SDA and reading
-    * back 0 (i.e. during a `WriteBit` of 1). The Start edge itself can't
-    * detect arb (both masters pulling low looks identical to solo). So
-    * "during Start" really means during the first 1-bit of the address byte.
-    * Address `0x55` (8-bit form `0xAA = 10101010`) puts a 1 at bit 7, the
-    * very first bit shifted out, so the competitor wins on the first
-    * release.
+    * back 0 (i.e. during a `WriteBit` of 1). The Start edge itself can't detect
+    * arb (both masters pulling low looks identical to solo). So "during Start"
+    * really means during the first 1-bit of the address byte. Address `0x55`
+    * (8-bit form `0xAA = 10101010`) puts a 1 at bit 7, the very first bit
+    * shifted out, so the competitor wins on the first release.
     */
   private def caseArbLossDuringStart(): Unit = {
     val cfg = I2cConfig(clkFreqHz = 12000000, busSpeed = BusSpeed.Standard)
-    val tCfg = BehaviouralI2cTargetConfig() // unused — DUT never reaches addr ACK.
+    val tCfg =
+      BehaviouralI2cTargetConfig() // unused — DUT never reaches addr ACK.
     SimConfig.withWave.compile(Rig(cfg, tCfg)).doSim("arb-loss-start") { rig =>
       rig.clockDomain.forkStimulus(period = 10)
       rig.io.cmd.valid #= false
@@ -944,7 +944,11 @@ object I2cByteControllerSim {
 
         for (
           (addr, badData, goodData) <- Seq(
-            (ByteCmdKind.AddrWrite, ByteCmdKind.ReadData, ByteCmdKind.WriteData),
+            (
+              ByteCmdKind.AddrWrite,
+              ByteCmdKind.ReadData,
+              ByteCmdKind.WriteData
+            ),
             (ByteCmdKind.AddrRead, ByteCmdKind.WriteData, ByteCmdKind.ReadData)
           )
         ) {
